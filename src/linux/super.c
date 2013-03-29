@@ -150,8 +150,9 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 {
 	int rc;
 	char b[BDEVNAME_SIZE];
-	struct smashfs_super *sbl;
+	struct inode *root;
 	struct smashfs_super_info *sbi;
+	struct smashfs_super_block *sbl;
 
 	sbi = kmalloc(sizeof(struct smashfs_super_info), GFP_KERNEL);
 	if (sbi == NULL) {
@@ -167,7 +168,7 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 
 	printk(KERN_INFO "smashfs: dev block size: %d, log2: %d", sbi->devblksize, sbi->devblksize_log2);
 
-	sbl = kmalloc(sizeof(struct smashfs_super_info), GFP_KERNEL);
+	sbl = kmalloc(sizeof(struct smashfs_super_block), GFP_KERNEL);
 	if (sbl == NULL) {
 		printk(KERN_ERR "smashfs: kalloc failed for super block\n");
 		kfree(sbi);
@@ -175,8 +176,8 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		return -ENOMEM;
 	}
 
-	rc = smashfs_read(sb, sbl, SMASHFS_START, sizeof(struct smashfs_super));
-	if (rc != sizeof(struct smashfs_super)) {
+	rc = smashfs_read(sb, sbl, SMASHFS_START, sizeof(struct smashfs_super_block));
+	if (rc != sizeof(struct smashfs_super_block)) {
 		printk(KERN_ERR "smashfs: could not read super block\n");
 		kfree(sbl);
 		kfree(sbi);
@@ -195,14 +196,41 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	printk(KERN_INFO "smashfs: magic  : 0x%08x\n", sbl->magic);
 	printk(KERN_INFO "smashfs: version: 0x%08x\n", sbl->version);
 
+	sbi->block_size = sbl->block_size;
+	sbi->block_log2 = sbl->block_log2;
+
 	sb->s_magic = sbl->magic;
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	sb->s_flags |= MS_RDONLY;
 	sb->s_op = &smashfs_super_ops;
 
+#if 0
+	root = smashfs_get_inode(sb, &sbl->root);
+	if (!root) {
+		printk(KERN_ERR "smashfs: can not get root inode\n");
+		kfree(sbl);
+		kfree(sbi);
+		sb->s_fs_info = NULL;
+		return -EINVAL;
+	}
+	sb->s_root = d_alloc_root(root);
+	if (!sb->s_root) {
+		printk(KERN_ERR "smashfs: d_alloc_root failed\n");
+		iput(root);
+		kfree(sbl);
+		kfree(sbi);
+		sb->s_fs_info = NULL;
+		return -EINVAL;
+	}
+
+	kfree(sbl);
+	sb->s_fs_info = sbi;
+
+	return 0;
+#else
 	kfree(sbl);
 	kfree(sbi);
 	sb->s_fs_info = NULL;
-
-	return -EIO;
+	return -EINVAL;
+#endif
 }

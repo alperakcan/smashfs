@@ -17,14 +17,14 @@ static struct file_system_type smashfs_fs_type = {
 	.fs_flags	= FS_REQUIRES_DEV,
 };
 
-static int __init init_smashfs_fs(void)
+static int __init init_smashfs_fs (void)
 {
 	int rc;
 	rc = register_filesystem(&smashfs_fs_type);
 	return rc;
 }
 
-static void __exit exit_smashfs_fs(void)
+static void __exit exit_smashfs_fs (void)
 {
 	unregister_filesystem(&smashfs_fs_type);
 }

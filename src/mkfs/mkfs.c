@@ -10,7 +10,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#include "../include/list.h"
+#include <sys/queue.h>
+
 #include "../include/smashfs.h"
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -21,13 +22,13 @@ struct item {
 };
 
 struct source {
-	struct smashfs_list head;
+	LIST_ENTRY(source) head;
 	char *path;
 };
 
 static char *output = NULL;
 static unsigned int block_size = 4096;
-static struct smashfs_list sources = SMASHFS_LIST_HEAD_INIT(sources);
+static LIST_HEAD(sources, source) sources;
 
 unsigned int slog (unsigned int block)
 {
@@ -44,7 +45,7 @@ static int write_output (void)
 {
 	int rc;
 	int fd;
-	struct smashfs_super super;
+	struct smashfs_super_block super;
 	fprintf(stdout, "writing file: %s\n", output);
 	fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (fd < 0) {
@@ -57,8 +58,9 @@ static int write_output (void)
 	super.block_size = block_size;
 	super.block_log2 = slog(block_size);
 	super.inodes = 0;
-	rc = write(fd, &super, sizeof(struct smashfs_super));
-	if (rc != sizeof(struct smashfs_super)) {
+	super.root = 0;
+	rc = write(fd, &super, sizeof(struct smashfs_super_block));
+	if (rc != sizeof(struct smashfs_super_block)) {
 		fprintf(stderr, "write failed for super\n");
 		close(fd);
 		return -1;
@@ -67,16 +69,104 @@ static int write_output (void)
 	return 0;
 }
 
+static struct smashfs_inode * get_inode (const char *path)
+{
+	int rc;
+	struct stat stbuf;
+	struct smashfs_inode *inode;
+	rc = stat(path, &stbuf);
+	if (rc != 0) {
+		fprintf(stderr, "stat for %s failed\n", path);
+		return NULL;
+	}
+	if (stbuf.st_uid > SMASHFS_INODE_UID_MAX) {
+		fprintf(stderr, "uid: %d is greater than allowed limit: %d\n", stbuf.st_uid, SMASHFS_INODE_UID_MAX);
+		return NULL;
+	}
+	if (stbuf.st_gid > SMASHFS_INODE_GID_MAX) {
+		fprintf(stderr, "gid: %d is greater than allowed limit: %d\n", stbuf.st_gid, SMASHFS_INODE_GID_MAX);
+		return NULL;
+	}
+	if (stbuf.st_size > SMASHFS_INODE_SIZE_MAX) {
+		fprintf(stderr, "size: %zd is greater than allowed limit: %d\n", stbuf.st_size, SMASHFS_INODE_SIZE_MAX);
+		return NULL;
+	}
+	inode = malloc(sizeof(struct smashfs_inode));
+	if (inode == NULL) {
+		fprintf(stderr, "malloc failed for smashfs inode\n");
+		return NULL;
+	}
+	if (S_ISREG(stbuf.st_mode)) {
+		inode->type = smashfs_inode_type_regular_file;
+	} else if (S_ISDIR(stbuf.st_mode)) {
+		inode->type = smashfs_inode_type_directory;
+	} else if (S_ISCHR(stbuf.st_mode)) {
+		inode->type = smashfs_inode_type_character_device;
+	} else if (S_ISBLK(stbuf.st_mode)) {
+		inode->type = smashfs_inode_type_block_device;
+	} else if (S_ISFIFO(stbuf.st_mode)) {
+		inode->type = smashfs_inode_type_fifo;
+	} else if (S_ISLNK(stbuf.st_mode)) {
+		inode->type = smashfs_inode_type_symbolic_link;
+	} else if (S_ISSOCK(stbuf.st_mode)) {
+		inode->type = smashfs_inode_type_socket;
+	} else {
+		fprintf(stderr, "unknown mode: 0x%08x, for path: %s\n", stbuf.st_mode, path);
+		free(inode);
+		return NULL;
+	}
+	inode->owner_mode = 0;
+	if (stbuf.st_mode & S_IRUSR) {
+		inode->owner_mode |= smashfs_inode_mode_read;
+	}
+	if (stbuf.st_mode & S_IWUSR) {
+		inode->owner_mode |= smashfs_inode_mode_write;
+	}
+	if (stbuf.st_mode & S_IXUSR) {
+		inode->owner_mode |= smashfs_inode_mode_execute;
+	}
+	inode->group_mode = 0;
+	if (stbuf.st_mode & S_IRGRP) {
+		inode->group_mode |= smashfs_inode_mode_read;
+	}
+	if (stbuf.st_mode & S_IWGRP) {
+		inode->group_mode |= smashfs_inode_mode_write;
+	}
+	if (stbuf.st_mode & S_IXGRP) {
+		inode->group_mode |= smashfs_inode_mode_execute;
+	}
+	inode->other_mode = 0;
+	if (stbuf.st_mode & S_IROTH) {
+		inode->other_mode |= smashfs_inode_mode_read;
+	}
+	if (stbuf.st_mode & S_IWOTH) {
+		inode->other_mode |= smashfs_inode_mode_write;
+	}
+	if (stbuf.st_mode & S_IXOTH) {
+		inode->other_mode |= smashfs_inode_mode_execute;
+	}
+	inode->uid = (stbuf.st_uid & SMASHFS_INODE_UID_MASK);
+	inode->gid = (stbuf.st_gid & SMASHFS_INODE_GID_MASK);
+	return inode;
+}
+
 static void scan_source (struct source *source)
 {
+	struct smashfs_inode *inode;
 	fprintf(stdout, "scanning source: %s\n", source->path);
+	inode = get_inode(source->path);
 }
 
 static void scan_sources (void)
 {
+	unsigned int nsources;
 	struct source *source;
-	fprintf(stdout, "scanning sources: %d\n", smashfs_list_count(&sources));
-	smashfs_list_for_each_entry(source, &sources, head) {
+	nsources = 0;
+	LIST_FOREACH(source, &sources, head) {
+		nsources += 1;
+	}
+	fprintf(stdout, "scanning sources: %d\n", nsources);
+	LIST_FOREACH(source, &sources, head) {
 		scan_source(source);
 	}
 }
@@ -93,8 +183,8 @@ int main (int argc, char *argv[])
 {
 	int c;
 	int option_index;
+	unsigned int nsources;
 	struct source *source;
-	struct source *nsource;
 	static struct option long_options[] = {
 		{"source"    , required_argument, 0, 's' },
 		{"output"    , required_argument, 0, 'o' },
@@ -118,7 +208,7 @@ int main (int argc, char *argv[])
 					free(source);
 					break;
 				}
-				smashfs_list_add_tail(&source->head, &sources);
+				LIST_INSERT_HEAD(&sources, source, head);
 				break;
 			case 'o':
 				output = strdup(optarg);
@@ -137,7 +227,11 @@ int main (int argc, char *argv[])
 				exit(0);
 		}
 	}
-	if (smashfs_list_count(&sources) == 0) {
+	nsources = 0;
+	LIST_FOREACH(source, &sources, head) {
+		nsources += 1;
+	}
+	if (nsources == 0) {
 		fprintf(stderr, "no source directory/file specified, quiting.\n");
 		goto bail;
 	}
@@ -147,16 +241,18 @@ int main (int argc, char *argv[])
 	}
 	scan_sources();
 	write_output();
-	smashfs_list_for_each_entry_safe(source, nsource, &sources, head) {
-		smashfs_list_del(&source->head);
+	while (sources.lh_first != NULL) {
+		source = sources.lh_first;;
+		LIST_REMOVE(source, head);
 		free(source->path);
 		free(source);
 	}
 	free(output);
 	return 0;
 bail:
-	smashfs_list_for_each_entry_safe(source, nsource, &sources, head) {
-		smashfs_list_del(&source->head);
+	while (sources.lh_first != NULL) {
+		source = sources.lh_first;;
+		LIST_REMOVE(source, head);
 		free(source->path);
 		free(source);
 	}
