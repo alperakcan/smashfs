@@ -88,7 +88,7 @@ static struct smashfs_inode * get_inode (const char *path)
 		return NULL;
 	}
 	if (stbuf.st_size > SMASHFS_INODE_SIZE_MAX) {
-		fprintf(stderr, "size: %zd is greater than allowed limit: %d\n", stbuf.st_size, SMASHFS_INODE_SIZE_MAX);
+		fprintf(stderr, "size: %lld is greater than allowed limit: %d\n", (unsigned long long) stbuf.st_size, SMASHFS_INODE_SIZE_MAX);
 		return NULL;
 	}
 	inode = malloc(sizeof(struct smashfs_inode));
