@@ -109,30 +109,23 @@ struct smashfs_inode {
 	uint64_t padding			: SMASHFS_INODE_PADDING_LENGTH;
 } __attribute__((packed));
 
-struct smashfs_inode_socket {
-	struct smashfs_inode inode;
-};
-
-struct smashfs_inode_symbolic_link {
-	struct smashfs_inode inode;
-};
-
 struct smashfs_inode_regular_file {
-	struct smashfs_inode inode;
-};
-
-struct smashfs_inode_block_device {
-	struct smashfs_inode inode;
 };
 
 struct smashfs_inode_directory {
-	struct smashfs_inode inode;
 };
 
 struct smashfs_inode_character_device {
-	struct smashfs_inode inode;
+};
+
+struct smashfs_inode_block_device {
+};
+
+struct smashfs_inode_symbolic_link {
 };
 
 struct smashfs_inode_fifo {
-	struct smashfs_inode inode;
+};
+
+struct smashfs_inode_socket {
 };
