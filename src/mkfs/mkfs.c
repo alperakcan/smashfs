@@ -112,10 +112,23 @@ static int write_output (void)
 	return 0;
 }
 
+static struct smashfs_inode_directory * new_directory (void)
+{
+	struct smashfs_inode_directory *directory;
+	directory = malloc(sizeof(struct smashfs_inode_directory));
+	if (directory == NULL) {
+		fprintf(stderr, "malloc failed\n");
+		return NULL;
+	}
+	directory->parent = -1;
+	return directory;
+}
+
 static struct smashfs_inode * new_inode (const struct stat const *stbuf)
 {
 	struct smashfs_inode *inode;
 	struct smashfs_inode *tinodes;
+	struct smashfs_inode_directory *directory;
 	if (ninodes + 1 >= sinodes) {
 		if (sinodes == 0) {
 			sinodes = 1;
@@ -149,12 +162,15 @@ static struct smashfs_inode * new_inode (const struct stat const *stbuf)
 		return NULL;
 	}
 	inode = &inodes[ninodes];
-	inode->number = ninodes;
-	ninodes += 1;
 	if (S_ISREG(stbuf->st_mode)) {
 		inode->type = smashfs_inode_type_regular_file;
 	} else if (S_ISDIR(stbuf->st_mode)) {
 		inode->type = smashfs_inode_type_directory;
+		directory = new_directory();
+		if (directory == NULL) {
+			fprintf(stderr, "new directory failed\n");
+			return NULL;
+		}
 	} else if (S_ISCHR(stbuf->st_mode)) {
 		inode->type = smashfs_inode_type_character_device;
 	} else if (S_ISBLK(stbuf->st_mode)) {
@@ -202,6 +218,9 @@ static struct smashfs_inode * new_inode (const struct stat const *stbuf)
 	}
 	inode->uid = (stbuf->st_uid & SMASHFS_INODE_UID_MASK);
 	inode->gid = (stbuf->st_gid & SMASHFS_INODE_GID_MASK);
+	inode->size = 0;
+	inode->number = ninodes;
+	ninodes += 1;
 	return inode;
 }
 
@@ -213,6 +232,7 @@ static void scan_sources (void)
 	struct source *source;
 	unsigned int nsources;
 	struct smashfs_inode *inode;
+	struct smashfs_inode *parent;
 	nsources = 0;
 	LIST_FOREACH(source, &sources, head) {
 		nsources += 1;
@@ -279,6 +299,7 @@ static void scan_sources (void)
 			continue;
 		}
 		node->fts_pointer = inode;
+		parent = node->fts_parent->fts_pointer;
 		if (debug) {
 			int l;
 			for (l = 0; l < node->fts_level; l++) {
@@ -291,7 +312,7 @@ static void scan_sources (void)
 					  "?",
 					node->fts_name,
 					inode->number,
-					(node->fts_parent->fts_pointer != NULL) ? (int) ((struct smashfs_inode *) node->fts_parent->fts_pointer)->number : -1);
+					(parent  != NULL) ? (int) parent->number : -1);
 		}
 	}
 	fts_close(tree);

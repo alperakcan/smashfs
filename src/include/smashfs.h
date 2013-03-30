@@ -112,7 +112,14 @@ struct smashfs_inode {
 struct smashfs_inode_regular_file {
 };
 
+struct smashfs_inode_directory_entry {
+	uint64_t number				: SMASHFS_INODE_NUMBER_LENGTH;
+	char name[0];
+} __attribute__((packed));
+
 struct smashfs_inode_directory {
+	uint64_t parent				: SMASHFS_INODE_NUMBER_LENGTH;
+	struct smashfs_inode_directory_entry entries[0];
 };
 
 struct smashfs_inode_character_device {
