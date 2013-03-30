@@ -87,7 +87,7 @@ static int write_output (void)
 		fprintf(stderr, "open failed for: %s\n", output);
 		return -1;
 	}
-	fprintf(stdout, "  writing super block\n");
+	fprintf(stdout, "  writing super block (%zd bytes)\n", sizeof(struct smashfs_super_block));
 	super.magic = SMASHFS_MAGIC;
 	super.version = SMASHFS_VERSION_0;
 	super.ctime = 0;
@@ -101,7 +101,7 @@ static int write_output (void)
 		close(fd);
 		return -1;
 	}
-	fprintf(stdout, "  writing inode table (%d bytes)\n", sizeof(struct smashfs_inode) * ninodes);
+	fprintf(stdout, "  writing inode table (%llu bytes)\n", sizeof(struct smashfs_inode) * ninodes);
 	rc = write(fd, inodes, sizeof(struct smashfs_inode) * ninodes);
 	if (rc != (int) (sizeof(struct smashfs_inode) * ninodes)) {
 		fprintf(stderr, "write failed for inode table\n");
