@@ -32,7 +32,7 @@
 #define SMASHFS_VERSION_0			SMASHFS_MKTAG('V', '0', '0', '0')
 
 #define SMASHFS_START				0
-#define SMASHFS_NAME_LEN			255
+#define SMASHFS_NAME_LEN			256
 
 #define SMASHFS_INODE_NUMBER_LENGTH		32
 #define SMASHFS_INODE_NUMBER_MAX		((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_NUMBER_LENGTH) - 1))
@@ -110,7 +110,9 @@ struct smashfs_inode {
 	uint64_t uid				: SMASHFS_INODE_UID_LENGTH;
 	uint64_t gid				: SMASHFS_INODE_GID_LENGTH;
 	uint64_t size				: SMASHFS_INODE_SIZE_LENGTH;
+#if (SMASHFS_INODE_PADDING_LENGTH > 0)
 	uint64_t padding			: SMASHFS_INODE_PADDING_LENGTH;
+#endif
 } __attribute__((packed));
 
 struct smashfs_inode_regular_file {
