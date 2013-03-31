@@ -33,6 +33,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <limits.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -53,30 +54,43 @@ struct item {
 };
 
 struct source {
-	LIST_ENTRY(source) head;
+	LIST_ENTRY(source) sources;
 	char *path;
 };
 
-struct inode {
+struct node {
 	unsigned long long number;
-	char name[SMASHFS_NAME_LEN];
-	struct smashfs_inode inode;
+	unsigned long long type;
+	unsigned long long owner_mode;
+	unsigned long long group_mode;
+	unsigned long long other_mode;
+	unsigned long long uid;
+	unsigned long long gid;
+	unsigned long long size;
+	char name[PATH_MAX];
 	UT_hash_handle hh;
 };
 
+struct entry_regular_file {
+};
+
+struct entry_directory {
+	struct node *parent;
+};
+
 struct entry {
-	struct inode *inode;
+	struct node *node;
 	union {
-		struct smashfs_inode_regular_file *regular_file;
-		struct smashfs_inode_directory *directory;
+		struct entry_regular_file regular_file;
+		struct entry_directory directory;
 	};
 	UT_hash_handle hh;
 };
 
 static LIST_HEAD(sources, source) sources;
 
-static unsigned long long inodes_id		= 0;
-static struct inode *inodes_table		= NULL;
+static unsigned long long nodes_id		= 0;
+static struct node *nodes_table		= NULL;
 static struct entry *entries_table		= NULL;
 
 static int debug				= 0;
@@ -98,8 +112,6 @@ static int output_write (void)
 {
 	int rc;
 	int fd;
-	struct inode *inode;
-	struct inode *ninode;
 	struct smashfs_super_block super;
 	fprintf(stdout, "writing file: %s\n", output);
 	fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -121,162 +133,99 @@ static int output_write (void)
 		close(fd);
 		return -1;
 	}
-	fprintf(stdout, "  writing inodes table (%zd bytes (%d inodes))\n", sizeof(struct smashfs_inode) * HASH_CNT(hh, inodes_table), HASH_CNT(hh, inodes_table));
-	HASH_ITER(hh, inodes_table, inode, ninode) {
-		rc = write(fd, &inode->inode, sizeof(struct smashfs_inode));
-		if (rc != sizeof(struct smashfs_inode)) {
-			fprintf(stderr, "write failed for inode\n");
-			close(fd);
-			return -1;
-		}
-	}
 	close(fd);
 	return 0;
 }
 
-static int inode_delete (struct inode *inode)
+static int node_delete (struct node *node)
 {
-	HASH_DEL(inodes_table, inode);
-	free(inode);
+	HASH_DEL(nodes_table, node);
+	free(node);
 	return 0;
 }
 
-static struct inode * inode_new (const struct stat const *stbuf, const char const *name)
+static struct node * node_new (const struct stat *stbuf, const char *name)
 {
-	struct inode *inode;
-	if (stbuf->st_uid > SMASHFS_INODE_UID_MAX) {
-		fprintf(stderr, "uid: %d is greater than allowed limit: %d\n", stbuf->st_uid, SMASHFS_INODE_UID_MAX);
-		return NULL;
-	}
-	if (stbuf->st_gid > SMASHFS_INODE_GID_MAX) {
-		fprintf(stderr, "gid: %d is greater than allowed limit: %d\n", stbuf->st_gid, SMASHFS_INODE_GID_MAX);
-		return NULL;
-	}
-	if (stbuf->st_size > SMASHFS_INODE_SIZE_MAX) {
-		fprintf(stderr, "size: %lld is greater than allowed limit: %d\n", (unsigned long long) stbuf->st_size, SMASHFS_INODE_SIZE_MAX);
-		return NULL;
-	}
-	if (name == NULL) {
-		fprintf(stderr, "name is null\n");
-		return NULL;
-	}
-	inode = malloc(sizeof(struct inode));
-	if (inode == NULL) {
+	struct node *node;
+	node = malloc(sizeof(struct node));
+	if (node == NULL) {
 		fprintf(stderr, "malloc failed\n");
 		return NULL;
 	}
-	snprintf(inode->name, SMASHFS_NAME_LEN, "%s", name);
+	snprintf(node->name, PATH_MAX, "%s", name);
 	if (S_ISREG(stbuf->st_mode)) {
-		inode->inode.type = smashfs_inode_type_regular_file;
+		node->type = smashfs_inode_type_regular_file;
 	} else if (S_ISDIR(stbuf->st_mode)) {
-		inode->inode.type = smashfs_inode_type_directory;
+		node->type = smashfs_inode_type_directory;
 	} else if (S_ISCHR(stbuf->st_mode)) {
-		inode->inode.type = smashfs_inode_type_character_device;
+		node->type = smashfs_inode_type_character_device;
 	} else if (S_ISBLK(stbuf->st_mode)) {
-		inode->inode.type = smashfs_inode_type_block_device;
+		node->type = smashfs_inode_type_block_device;
 	} else if (S_ISFIFO(stbuf->st_mode)) {
-		inode->inode.type = smashfs_inode_type_fifo;
+		node->type = smashfs_inode_type_fifo;
 	} else if (S_ISLNK(stbuf->st_mode)) {
-		inode->inode.type = smashfs_inode_type_symbolic_link;
+		node->type = smashfs_inode_type_symbolic_link;
 	} else if (S_ISSOCK(stbuf->st_mode)) {
-		inode->inode.type = smashfs_inode_type_socket;
+		node->type = smashfs_inode_type_socket;
 	} else {
 		fprintf(stderr, "unknown mode: 0x%08x\n", stbuf->st_mode);
-		free(inode);
+		free(node);
 		return NULL;
 	}
-	inode->inode.owner_mode = 0;
+	node->owner_mode = 0;
 	if (stbuf->st_mode & S_IRUSR) {
-		inode->inode.owner_mode |= smashfs_inode_mode_read;
+		node->owner_mode |= smashfs_inode_mode_read;
 	}
 	if (stbuf->st_mode & S_IWUSR) {
-		inode->inode.owner_mode |= smashfs_inode_mode_write;
+		node->owner_mode |= smashfs_inode_mode_write;
 	}
 	if (stbuf->st_mode & S_IXUSR) {
-		inode->inode.owner_mode |= smashfs_inode_mode_execute;
+		node->owner_mode |= smashfs_inode_mode_execute;
 	}
-	inode->inode.group_mode = 0;
+	node->group_mode = 0;
 	if (stbuf->st_mode & S_IRGRP) {
-		inode->inode.group_mode |= smashfs_inode_mode_read;
+		node->group_mode |= smashfs_inode_mode_read;
 	}
 	if (stbuf->st_mode & S_IWGRP) {
-		inode->inode.group_mode |= smashfs_inode_mode_write;
+		node->group_mode |= smashfs_inode_mode_write;
 	}
 	if (stbuf->st_mode & S_IXGRP) {
-		inode->inode.group_mode |= smashfs_inode_mode_execute;
+		node->group_mode |= smashfs_inode_mode_execute;
 	}
-	inode->inode.other_mode = 0;
+	node->other_mode = 0;
 	if (stbuf->st_mode & S_IROTH) {
-		inode->inode.other_mode |= smashfs_inode_mode_read;
+		node->other_mode |= smashfs_inode_mode_read;
 	}
 	if (stbuf->st_mode & S_IWOTH) {
-		inode->inode.other_mode |= smashfs_inode_mode_write;
+		node->other_mode |= smashfs_inode_mode_write;
 	}
 	if (stbuf->st_mode & S_IXOTH) {
-		inode->inode.other_mode |= smashfs_inode_mode_execute;
+		node->other_mode |= smashfs_inode_mode_execute;
 	}
-	inode->inode.uid = (stbuf->st_uid & SMASHFS_INODE_UID_MASK);
-	inode->inode.gid = (stbuf->st_gid & SMASHFS_INODE_GID_MASK);
-	inode->inode.size = 0;
-	inode->inode.number = inodes_id++;
-	inode->number = inode->inode.number;
-	HASH_ADD(hh, inodes_table, number, sizeof(inode->number), inode);
-	return inode;
-}
-
-static struct smashfs_inode_regular_file * regular_file_new (void)
-{
-	struct smashfs_inode_regular_file *regular_file;
-	regular_file = malloc(sizeof(struct smashfs_inode_regular_file));
-	if (regular_file == NULL) {
-		fprintf(stderr, "malloc failed\n");
-		return NULL;
-	}
-	return regular_file;
-}
-
-static struct smashfs_inode_directory * directory_new (void)
-{
-	struct smashfs_inode_directory *directory;
-	directory = malloc(sizeof(struct smashfs_inode_directory));
-	if (directory == NULL) {
-		fprintf(stderr, "malloc failed\n");
-		return NULL;
-	}
-	directory->parent = -1;
-	directory->nentries = 0;
-	return directory;
+	node->uid = (stbuf->st_uid & SMASHFS_INODE_UID_MASK);
+	node->gid = (stbuf->st_gid & SMASHFS_INODE_GID_MASK);
+	node->size = 0;
+	node->number = nodes_id++;
+	node->number = node->number;
+	HASH_ADD(hh, nodes_table, number, sizeof(node->number), node);
+	return node;
 }
 
 static int entry_add_child (struct entry *parent, struct entry *child)
 {
-	struct inode *pinode;
-	struct inode *cinode;
-	struct smashfs_inode *psinode;
-	struct smashfs_inode *csinode;
-	struct smashfs_inode_directory *directory;
-	struct smashfs_inode_directory_entry *directory_entry;
+	struct node *pnode;
+	struct node *cnode;
 	if (parent == NULL) {
 		fprintf(stderr, "parent is null\n");
 		return -1;
 	}
-	cinode = child->inode;
-	csinode = &cinode->inode;
-	pinode = parent->inode;
-	psinode = &pinode->inode;
-	if (psinode->type != smashfs_inode_type_directory) {
+	cnode = child->node;
+	pnode = parent->node;
+	if (pnode->type != smashfs_inode_type_directory) {
 		fprintf(stderr, "parent is not a directory\n");
 		return -1;
 	}
-	directory = malloc(sizeof(struct smashfs_inode_directory) + ((parent->directory->nentries + 1) * sizeof(struct smashfs_inode_directory_entry)));
-	if (directory == NULL) {
-		fprintf(stderr, "malloc failed\n");
-		return -1;
-	}
-	memcpy(directory, parent->directory, sizeof(struct smashfs_inode_directory) + parent->directory->nentries * sizeof(struct smashfs_inode_directory_entry));
-	directory->entries[directory->nentries].number = child->inode->inode.number;
-	child->directory->parent = psinode->number;
-	free(directory);
+	child->directory.parent = parent->node;
 	return 0;
 }
 
@@ -287,7 +236,7 @@ static int entry_delete (struct entry *entry)
 	return 0;
 }
 
-static struct entry * entry_new (struct inode *inode)
+static struct entry * entry_new (struct node *node)
 {
 	struct entry *entry;
 	entry = malloc(sizeof(struct entry));
@@ -295,42 +244,32 @@ static struct entry * entry_new (struct inode *inode)
 		fprintf(stderr, "malloc failed\n");
 		return NULL;
 	}
-	entry->inode = inode;
-	if (entry->inode->inode.type == smashfs_inode_type_regular_file) {
-		entry->regular_file = regular_file_new();
-		if (entry->regular_file == NULL) {
-			fprintf(stderr, "new regular file failed\n");
-			free(entry);
-			return NULL;
-		}
-	} else if (entry->inode->inode.type == smashfs_inode_type_directory) {
-		entry->directory = directory_new();
-		if (entry->directory == NULL) {
-			fprintf(stderr, "new directory failed\n");
-			free(entry);
-			return NULL;
-		}
+	entry->node = node;
+	if (entry->node->type == smashfs_inode_type_regular_file) {
+	} else if (entry->node->type == smashfs_inode_type_directory) {
 	} else {
-		fprintf(stderr, "unknown type: %d\n", entry->inode->inode.type);
+		fprintf(stderr, "unknown type: %lld\n", entry->node->type);
 		free(entry);
 		return NULL;
 	}
-	HASH_ADD(hh, entries_table, inode, sizeof(entry->inode), entry);
+	HASH_ADD(hh, entries_table, node, sizeof(entry->node), entry);
 	return entry;
 }
 
 static void sources_scan (void)
 {
-	FTS *tree;
-	FTSENT *node;
-	char **paths;
+	struct node *node;
 	struct entry *entry;
 	struct entry *parent;
-	struct inode *inode;
 	unsigned int nsources;
 	struct source *source;
+
+	char **paths;
+	FTS *fts_tree;
+	FTSENT *fts_node;
+
 	nsources = 0;
-	LIST_FOREACH(source, &sources, head) {
+	LIST_FOREACH(source, &sources, sources) {
 		nsources += 1;
 	}
 	fprintf(stdout, "scanning sources: %d\n", nsources);
@@ -340,87 +279,87 @@ static void sources_scan (void)
 		return;
 	}
 	nsources = 0;
-	LIST_FOREACH(source, &sources, head) {
+	LIST_FOREACH(source, &sources, sources) {
 		fprintf(stdout, "  setting path: %d, as: %s\n", nsources, source->path);
 		paths[nsources] = source->path;
 		nsources += 1;
 	}
 	paths[nsources] = NULL;
-	tree = fts_open(paths, FTS_COMFOLLOW /* | FTS_NOCHDIR */ | FTS_PHYSICAL /* | FTS_SEEDOT */, NULL);
-	if (tree == NULL) {
+	fts_tree = fts_open(paths, FTS_COMFOLLOW /* | FTS_NOCHDIR */ | FTS_PHYSICAL /* | FTS_SEEDOT */, NULL);
+	if (fts_tree == NULL) {
 		fprintf(stderr, "fts_open failed\n");
 		free(paths);
 		return;
 	}
-	while ((node = fts_read(tree))) {
-		if (node->fts_info == FTS_NSOK) {
+	while ((fts_node = fts_read(fts_tree))) {
+		if (fts_node->fts_info == FTS_NSOK) {
 			fprintf(stderr, "A file for which no stat(2) information was\n"
 					"requested. The contents of the fts_statp field are\n"
 					"undefined.\n");
-			fprintf(stderr, "  path: %s\n", node->fts_path);
-			fprintf(stderr, "  info: 0x%08x\n", node->fts_info);
+			fprintf(stderr, "  path: %s\n", fts_node->fts_path);
+			fprintf(stderr, "  info: 0x%08x\n", fts_node->fts_info);
 			continue;
 		}
-		if (node->fts_info == FTS_ERR) {
+		if (fts_node->fts_info == FTS_ERR) {
 			fprintf(stderr, "This is an error return, and the fts_errno field\n"
 					"will be set to indicate what caused the error.\n");
-			fprintf(stderr, "  path : %s\n", node->fts_path);
-			fprintf(stderr, "  errno: %d\n", node->fts_errno);
+			fprintf(stderr, "  path : %s\n", fts_node->fts_path);
+			fprintf(stderr, "  errno: %d\n", fts_node->fts_errno);
 			continue;
 		}
-		if (node->fts_info == FTS_NS) {
+		if (fts_node->fts_info == FTS_NS) {
 			fprintf(stderr, "A file for which no stat(2) information was\n"
 					"available. The contents of the fts_statp field are\n"
 					"undefined. This is an error return, and the\n"
 					"fts_errno field will be set to indicate what caused\n"
 					"the error.\n");
-			fprintf(stderr, "  path : %s\n", node->fts_path);
-			fprintf(stderr, "  errno: %d\n", node->fts_errno);
+			fprintf(stderr, "  path : %s\n", fts_node->fts_path);
+			fprintf(stderr, "  errno: %d\n", fts_node->fts_errno);
 			continue;
 		}
-		if (node->fts_info == FTS_DNR) {
+		if (fts_node->fts_info == FTS_DNR) {
 			fprintf(stderr, "A directory which cannot be read. This is an error\n"
 					"return, and the fts_errno field will be set to\n"
 					"indicate what caused the error.\n");
-			fprintf(stderr, "  path : %s\n", node->fts_path);
-			fprintf(stderr, "  errno: %d\n", node->fts_errno);
+			fprintf(stderr, "  path : %s\n", fts_node->fts_path);
+			fprintf(stderr, "  errno: %d\n", fts_node->fts_errno);
 			continue;
 		}
-		if (node->fts_info == FTS_DP) {
+		if (fts_node->fts_info == FTS_DP) {
 			continue;
 		}
-		inode = inode_new(node->fts_statp, node->fts_name);
-		if (inode == NULL) {
-			fprintf(stderr, "new inode failed\n");
+		node = node_new(fts_node->fts_statp, fts_node->fts_name);
+		if (node == NULL) {
+			fprintf(stderr, "node new failed\n");
 			continue;
 		}
-		entry = entry_new(inode);
+		entry = entry_new(node);
 		if (entry == NULL) {
-			inode_delete(inode);
-			fprintf(stderr, "new entry failed\n");
+			fprintf(stderr, "entry new failed\n");
+			node_delete(node);
 			continue;
 		}
-		node->fts_pointer = entry;
-		parent = node->fts_parent->fts_pointer;
+		fts_node->fts_pointer = entry;
+		parent = fts_node->fts_parent->fts_pointer;
 		if (debug) {
 			int l;
-			for (l = 0; l < node->fts_level; l++) {
+			for (l = 0; l < fts_node->fts_level; l++) {
 				fprintf(stdout, " ");
 			}
-			fprintf(stdout, "%s %s (inode: %d, parent: %d)\n",
-					(inode->inode.type == smashfs_inode_type_regular_file) ? "(f)" :
-					  (inode->inode.type == smashfs_inode_type_directory) ? "(d)" :
-					  (inode->inode.type == smashfs_inode_type_symbolic_link) ? "(s)" :
+			fprintf(stdout, "%s %s (node: %lld, parent: %lld)\n",
+					(node->type == smashfs_inode_type_regular_file) ? "(f)" :
+					  (node->type == smashfs_inode_type_directory) ? "(d)" :
+					  (node->type == smashfs_inode_type_symbolic_link) ? "(s)" :
 					  "?",
-					node->fts_name,
-					inode->inode.number,
-					(parent != NULL) ? (int) parent->inode->inode.number : -1);
+					fts_node->fts_name,
+					node->number,
+					(parent != NULL) ? parent->node->number : (unsigned long long) -1);
 		}
 		if (parent != NULL) {
 			entry_add_child(parent, entry);
 		}
 	}
-	fts_close(tree);
+	fts_close(fts_tree);
 	free(paths);
 }
 
@@ -436,9 +375,14 @@ static void help_print (const char *pname)
 int main (int argc, char *argv[])
 {
 	int c;
+	int rc;
 	int option_index;
-	unsigned int nsources;
+	struct node *node;
+	struct node *nnode;
+	struct entry *entry;
+	struct entry *nentry;
 	struct source *source;
+	unsigned int nsources;
 	static struct option long_options[] = {
 		{"source"    , required_argument, 0, 's' },
 		{"output"    , required_argument, 0, 'o' },
@@ -447,6 +391,7 @@ int main (int argc, char *argv[])
 		{"help"      , no_argument      , 0, 'h' },
 		{ 0          , 0                , 0,  0 }
 	};
+	rc = 0;
 	option_index = 0;
 	while ((c = getopt_long(argc, argv, "hds:o:", long_options, &option_index)) != -1) {
 		switch (c) {
@@ -463,7 +408,7 @@ int main (int argc, char *argv[])
 					free(source);
 					break;
 				}
-				LIST_INSERT_HEAD(&sources, source, head);
+				LIST_INSERT_HEAD(&sources, source, sources);
 				break;
 			case 'o':
 				output = strdup(optarg);
@@ -486,34 +431,39 @@ int main (int argc, char *argv[])
 		}
 	}
 	nsources = 0;
-	LIST_FOREACH(source, &sources, head) {
+	LIST_FOREACH(source, &sources, sources) {
 		nsources += 1;
 	}
 	if (nsources == 0) {
 		fprintf(stderr, "no source directory/file specified, quiting.\n");
+		rc = -1;
 		goto bail;
 	}
 	if (output == NULL) {
 		fprintf(stderr, "no output file specified, quiting.\n");
+		rc = -1;
 		goto bail;
 	}
 	sources_scan();
+	fprintf(stdout, "statistics:\n");
+	fprintf(stdout, "  nodes : %d\n", HASH_CNT(hh, nodes_table));
+	fprintf(stdout, "  entries: %d\n", HASH_CNT(hh, entries_table));
 	output_write();
-	while (sources.lh_first != NULL) {
-		source = sources.lh_first;;
-		LIST_REMOVE(source, head);
-		free(source->path);
-		free(source);
-	}
-	free(output);
-	return 0;
 bail:
 	while (sources.lh_first != NULL) {
 		source = sources.lh_first;;
-		LIST_REMOVE(source, head);
+		LIST_REMOVE(source, sources);
 		free(source->path);
 		free(source);
 	}
+	HASH_ITER(hh, entries_table, entry, nentry) {
+		HASH_DEL(entries_table, entry);
+		entry_delete(entry);
+	}
+	HASH_ITER(hh, nodes_table, node, nnode) {
+		HASH_DEL(nodes_table, node);
+		node_delete(node);
+	}
 	free(output);
-	return -1;
+	return rc;
 }

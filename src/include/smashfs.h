@@ -32,7 +32,7 @@
 #define SMASHFS_VERSION_0			SMASHFS_MKTAG('V', '0', '0', '0')
 
 #define SMASHFS_START				0
-#define SMASHFS_NAME_LEN			256
+#define SMASHFS_NAME_LENGTH			256
 
 #define SMASHFS_INODE_NUMBER_LENGTH		32
 #define SMASHFS_INODE_NUMBER_MAX		((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_NUMBER_LENGTH) - 1))
