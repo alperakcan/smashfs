@@ -69,6 +69,10 @@
 
 #define SMASHFS_INODE_PADDING_LENGTH		((((SMASHFS_INODE_SIZE + 31) / 32) * 32) - SMASHFS_INODE_SIZE)
 
+#define SMASHFS_INODE_DIRECTORY_ENTRIES_LENGTH	32
+#define SMASHFS_INODE_DIRECTORY_ENTRIES__MAX	((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_DIRECTORY_ENTRIES_LENGTH) - 1))
+#define SMASHFS_INODE_DIRECTORY_ENTRIES__MASK	((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_DIRECTORY_ENTRIES_LENGTH) - 1))
+
 enum smashfs_inode_type {
 	smashfs_inode_type_regular_file		= 0x01,
 	smashfs_inode_type_directory		= 0x02,
@@ -119,6 +123,7 @@ struct smashfs_inode_directory_entry {
 
 struct smashfs_inode_directory {
 	uint64_t parent				: SMASHFS_INODE_NUMBER_LENGTH;
+	uint64_t nentries			: SMASHFS_INODE_DIRECTORY_ENTRIES_LENGTH;
 	struct smashfs_inode_directory_entry entries[0];
 };
 
