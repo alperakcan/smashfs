@@ -59,10 +59,19 @@ struct source {
 };
 
 struct node_regular_file {
+	unsigned long long size;
+	char content[0];
+};
+
+struct node_directory_entry {
+	unsigned long long number;
+	char name[0];
 };
 
 struct node_directory {
-	struct node *parent;
+	unsigned long long parent;
+	unsigned long long nentries;
+	struct node_directory_entry entries[0];
 };
 
 struct node {
@@ -73,11 +82,10 @@ struct node {
 	unsigned long long other_mode;
 	unsigned long long uid;
 	unsigned long long gid;
-	unsigned long long size;
-	char name[PATH_MAX];
 	union {
-		struct node_regular_file regular_file;
-		struct node_directory directory;
+		void *pointer;
+		struct node_regular_file *regular_file;
+		struct node_directory *directory;
 	};
 	UT_hash_handle hh;
 };
@@ -134,21 +142,31 @@ static int output_write (void)
 static int node_delete (struct node *node)
 {
 	HASH_DEL(nodes_table, node);
+	free(node->pointer);
 	free(node);
 	return 0;
 }
 
 static struct node * node_new (FTSENT *entry)
 {
+	int fd;
 	struct node *node;
 	struct stat *stbuf;
+	struct node *parent;
+	unsigned long long e;
+	unsigned long long s;
+	struct node_directory *directory;
+	struct node_directory_entry *directory_entry;
+	fd = -1;
 	stbuf = entry->fts_statp;
 	node = malloc(sizeof(struct node));
 	if (node == NULL) {
 		fprintf(stderr, "malloc failed\n");
 		return NULL;
 	}
-	snprintf(node->name, PATH_MAX, "%s", entry->fts_name);
+	entry->fts_pointer = node;
+	node->number = nodes_id;
+	node->pointer = NULL;
 	if (S_ISREG(stbuf->st_mode)) {
 		node->type = smashfs_inode_type_regular_file;
 	} else if (S_ISDIR(stbuf->st_mode)) {
@@ -198,13 +216,78 @@ static struct node * node_new (FTSENT *entry)
 	if (stbuf->st_mode & S_IXOTH) {
 		node->other_mode |= smashfs_inode_mode_execute;
 	}
-	node->uid = (stbuf->st_uid & SMASHFS_INODE_UID_MASK);
-	node->gid = (stbuf->st_gid & SMASHFS_INODE_GID_MASK);
-	node->size = 0;
-	node->number = nodes_id++;
-	node->number = node->number;
+	node->uid = stbuf->st_uid;
+	node->gid = stbuf->st_gid;
+	if (node->type == smashfs_inode_type_regular_file) {
+		fd = open(entry->fts_accpath, O_RDONLY);
+		if (fd < 0) {
+			fprintf(stderr, "open failed\n");
+			goto bail;
+		}
+		node->regular_file = malloc(sizeof(struct node_regular_file) + stbuf->st_size);
+		if (node->regular_file == NULL) {
+			fprintf(stderr, "malloc failed\n");
+			goto bail;
+		}
+		node->regular_file->size = stbuf->st_size;
+		s = read(fd, node->regular_file->content, node->regular_file->size);
+		if (s != node->regular_file->size) {
+			fprintf(stderr, "read failed\n");
+			goto bail;
+		}
+		close(fd);
+	} else if (node->type == smashfs_inode_type_directory) {
+		node->directory = malloc(sizeof(struct node_directory));
+		if (node->directory == NULL) {
+			fprintf(stderr, "malloc failed\n");
+			goto bail;
+		}
+		node->directory->parent = -1;
+		node->directory->nentries = 0;
+		parent = entry->fts_parent->fts_pointer;
+		if (parent == NULL) {
+			goto out;
+		}
+		node->directory->parent = parent->number;
+	} else {
+		fprintf(stderr, "unknown node type: %lld\n", node->type);
+		goto bail;
+	}
+	parent = entry->fts_parent->fts_pointer;
+	if (parent == NULL) {
+		goto out;
+	}
+	if (parent->type != smashfs_inode_type_directory) {
+		fprintf(stderr, "parent is not a directory\n");
+		goto bail;
+	}
+	directory = parent->directory;
+	s = sizeof(struct node_directory);
+	for (e = 0; e < directory->nentries; e++) {
+		directory_entry = (struct node_directory_entry *) (((unsigned char *) directory) + s);
+		s += sizeof(struct node_directory_entry) + strlen(directory_entry->name) + 1;
+	}
+	directory = malloc(s + sizeof(struct node_directory_entry) + strlen(entry->fts_name) + 1);
+	if (directory == NULL) {
+		fprintf(stderr, "malloc failed\n");
+		goto bail;
+	}
+	memcpy(directory, parent->directory, s);
+	directory_entry = (struct node_directory_entry *) (((unsigned char *) directory) + s);
+	directory_entry->number = node->number;
+	memcpy(directory_entry->name, entry->fts_name, strlen(entry->fts_name) + 1);
+	directory->nentries += 1;
+	free(parent->directory);
+	parent->directory = directory;
+out:
 	HASH_ADD(hh, nodes_table, number, sizeof(node->number), node);
+	nodes_id += 1;
 	return node;
+bail:
+	close(fd);
+	free(node->pointer);
+	free(node);
+	return NULL;
 }
 
 static void sources_scan (void)
@@ -213,7 +296,6 @@ static void sources_scan (void)
 	FTSENT *entry;
 	char **spaths;
 	struct node *node;
-	struct node *parent;
 	struct source *source;
 	unsigned int nsources;
 	nsources = 0;
@@ -282,10 +364,10 @@ static void sources_scan (void)
 			fprintf(stderr, "node new failed\n");
 			continue;
 		}
-		entry->fts_pointer = node;
-		parent = entry->fts_parent->fts_pointer;
 		if (debug) {
 			int l;
+			struct node *parent;
+			parent = entry->fts_parent->fts_pointer;
 			for (l = 0; l < entry->fts_level; l++) {
 				fprintf(stdout, " ");
 			}
@@ -301,7 +383,7 @@ static void sources_scan (void)
 	}
 	fts_close(tree);
 	free(spaths);
-	fprintf(stdout, "found %d nodes\n", HASH_CNT(hh, nodes_table));
+	fprintf(stdout, "  found %d nodes\n", HASH_CNT(hh, nodes_table));
 }
 
 static void help_print (const char *pname)
@@ -386,14 +468,12 @@ int main (int argc, char *argv[])
 	sources_scan();
 	output_write();
 bail:
-	fprintf(stdout, "deleting sources\n");
 	while (sources.lh_first != NULL) {
 		source = sources.lh_first;;
 		LIST_REMOVE(source, sources);
 		free(source->path);
 		free(source);
 	}
-	fprintf(stdout, "deleting nodes\n");
 	HASH_ITER(hh, nodes_table, node, nnode) {
 		node_delete(node);
 	}
