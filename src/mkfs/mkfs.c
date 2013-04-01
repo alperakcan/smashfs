@@ -445,6 +445,16 @@ static int output_write (void)
 				s += sizeof(struct node_directory_entry) + strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name) + 1;
 			}
 			free(buffer);
+		} else if (node->type == smashfs_inode_type_symbolic_link) {
+			rc = write(fd, node->symbolic_link->path, strlen(node->symbolic_link->path) + 1);
+			if (rc != (ssize_t) strlen(node->symbolic_link->path) + 1) {
+				fprintf(stdout, "write failed\n");
+				free(buffer);
+				close(fd);
+				return -1;
+			}
+		} else {
+			fprintf(stderr, "unknown type: %lld\n", node->type);
 		}
 	}
 
@@ -602,6 +612,19 @@ static struct node * node_new (FTSENT *entry)
 			goto bail;
 		}
 		node->symbolic_link->path[r] = '\0';
+		HASH_ITER(hh, nodes_table, dnode, ndnode) {
+			if (dnode->type != smashfs_inode_type_symbolic_link) {
+				continue;
+			}
+			if (strcmp(dnode->symbolic_link->path, node->symbolic_link->path) != 0) {
+				continue;
+			}
+			free(node->pointer);
+			free(node);
+			node = dnode;
+			duplicate = 1;
+			break;
+		}
 	} else {
 		fprintf(stderr, "unknown node type: %lld\n", node->type);
 		goto bail;
@@ -835,10 +858,11 @@ int main (int argc, char *argv[])
 	}
 	sources_scan();
 	output_write();
-	fprintf(stdout, "duplicates    : %lld\n", nduplicates);
-	fprintf(stdout, "regular_files : %lld\n", nregular_files);
-	fprintf(stdout, "directories   : %lld\n", ndirectories);
-	fprintf(stdout, "symbolic_links: %lld\n", nsymbolic_links);
+	fprintf(stdout, "statistics:\n");
+	fprintf(stdout, "  duplicates    : %lld\n", nduplicates);
+	fprintf(stdout, "  regular_files : %lld\n", nregular_files);
+	fprintf(stdout, "  directories   : %lld\n", ndirectories);
+	fprintf(stdout, "  symbolic_links: %lld\n", nsymbolic_links);
 bail:
 	while (sources.lh_first != NULL) {
 		source = sources.lh_first;;
