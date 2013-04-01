@@ -32,46 +32,6 @@
 #define SMASHFS_VERSION_0			SMASHFS_MKTAG('V', '0', '0', '0')
 
 #define SMASHFS_START				0
-#define SMASHFS_NAME_LENGTH			256
-
-#define SMASHFS_INODE_NUMBER_LENGTH		32
-#define SMASHFS_INODE_NUMBER_MAX		((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_NUMBER_LENGTH) - 1))
-#define SMASHFS_INODE_NUMBER_MASK		((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_NUMBER_LENGTH) - 1))
-
-#define SMASHFS_INODE_TYPE_LENGTH		3
-#define SMASHFS_INODE_TYPE_MAX			((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_TYPE_LENGTH) - 1))
-#define SMASHFS_INODE_TYPE_MASK			((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_TYPE_LENGTH) - 1))
-
-#define SMASHFS_INODE_MODE_LENGTH		3
-#define SMASHFS_INODE_MODE_MAX			((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_MODE_LENGTH) - 1))
-#define SMASHFS_INODE_MODE_MASK			((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_MODE_LENGTH) - 1))
-
-#define SMASHFS_INODE_UID_LENGTH		16
-#define SMASHFS_INODE_UID_MAX			((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_UID_LENGTH) - 1))
-#define SMASHFS_INODE_UID_MASK			((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_UID_LENGTH) - 1))
-
-#define SMASHFS_INODE_GID_LENGTH		16
-#define SMASHFS_INODE_GID_MAX			((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_GID_LENGTH) - 1))
-#define SMASHFS_INODE_GID_MASK			((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_GID_LENGTH) - 1))
-
-#define SMASHFS_INODE_SIZE_LENGTH		32
-#define SMASHFS_INODE_SIZE_MAX			((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_SIZE_LENGTH) - 1))
-#define SMASHFS_INODE_SIZE_MASK			((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_SIZE_LENGTH) - 1))
-
-#define SMASHFS_INODE_SIZE			(SMASHFS_INODE_NUMBER_LENGTH + \
-						 SMASHFS_INODE_TYPE_LENGTH + \
-						 SMASHFS_INODE_MODE_LENGTH + \
-						 SMASHFS_INODE_MODE_LENGTH + \
-						 SMASHFS_INODE_MODE_LENGTH + \
-						 SMASHFS_INODE_UID_LENGTH + \
-						 SMASHFS_INODE_GID_LENGTH + \
-						 SMASHFS_INODE_SIZE_LENGTH)
-
-#define SMASHFS_INODE_PADDING_LENGTH		((((SMASHFS_INODE_SIZE + 31) / 32) * 32) - SMASHFS_INODE_SIZE)
-
-#define SMASHFS_INODE_DIRECTORY_ENTRIES_LENGTH	32
-#define SMASHFS_INODE_DIRECTORY_ENTRIES__MAX	((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_DIRECTORY_ENTRIES_LENGTH) - 1))
-#define SMASHFS_INODE_DIRECTORY_ENTRIES__MASK	((unsigned int) (((unsigned long long) 1 << SMASHFS_INODE_DIRECTORY_ENTRIES_LENGTH) - 1))
 
 enum smashfs_inode_type {
 	smashfs_inode_type_regular_file		= 0x01,
@@ -99,49 +59,21 @@ struct smashfs_super_block {
 	uint32_t block_size;
 	uint32_t block_log2;
 	uint32_t root;
-} __attribute__((packed));
-
-struct smashfs_inode {
-	uint64_t number				: SMASHFS_INODE_NUMBER_LENGTH;
-	uint64_t type				: SMASHFS_INODE_TYPE_LENGTH;
-	uint64_t owner_mode			: SMASHFS_INODE_MODE_LENGTH;
-	uint64_t group_mode			: SMASHFS_INODE_MODE_LENGTH;
-	uint64_t other_mode			: SMASHFS_INODE_MODE_LENGTH;
-	uint64_t uid				: SMASHFS_INODE_UID_LENGTH;
-	uint64_t gid				: SMASHFS_INODE_GID_LENGTH;
-#if (SMASHFS_INODE_PADDING_LENGTH > 0)
-	uint64_t padding			: SMASHFS_INODE_PADDING_LENGTH;
-#endif
-} __attribute__((packed));
-
-struct smashfs_inode_regular_file {
-	uint64_t size				: SMASHFS_INODE_SIZE_LENGTH;
-	char content[0];
-} __attribute__((packed));
-
-struct smashfs_inode_directory_entry {
-	uint64_t number				: SMASHFS_INODE_NUMBER_LENGTH;
-	char name[0];
-} __attribute__((packed));
-
-struct smashfs_inode_directory {
-	uint64_t parent				: SMASHFS_INODE_NUMBER_LENGTH;
-	uint64_t nentries			: SMASHFS_INODE_DIRECTORY_ENTRIES_LENGTH;
-	struct smashfs_inode_directory_entry entries[0];
-} __attribute__((packed));
-
-struct smashfs_inode_character_device {
-} __attribute__((packed));
-
-struct smashfs_inode_block_device {
-} __attribute__((packed));
-
-struct smashfs_inode_symbolic_link {
-	char path[0];
-} __attribute__((packed));
-
-struct smashfs_inode_fifo {
-} __attribute__((packed));
-
-struct smashfs_inode_socket {
+	struct {
+		struct {
+			uint32_t ctime;
+			uint32_t mtime;
+		} min;
+		struct {
+			uint32_t number;
+			uint32_t type;
+			uint32_t owner_mode;
+			uint32_t group_mode;
+			uint32_t other_mode;
+			uint32_t uid;
+			uint32_t gid;
+			uint32_t ctime;
+			uint32_t mtime;
+		} inode;
+	} bits;
 } __attribute__((packed));

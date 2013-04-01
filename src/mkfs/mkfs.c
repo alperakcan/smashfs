@@ -45,6 +45,7 @@
 #include "../include/smashfs.h"
 
 #include "uthash.h"
+#include "bitbuffer.h"
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
@@ -79,13 +80,15 @@ struct node_symbolic_link {
 };
 
 struct node {
-	unsigned long long number;
-	unsigned long long type;
-	unsigned long long owner_mode;
-	unsigned long long group_mode;
-	unsigned long long other_mode;
-	unsigned long long uid;
-	unsigned long long gid;
+	long long number;
+	long long type;
+	long long owner_mode;
+	long long group_mode;
+	long long other_mode;
+	long long uid;
+	long long gid;
+	long long ctime;
+	long long mtime;
 	union {
 		void *pointer;
 		struct node_regular_file *regular_file;
@@ -115,79 +118,166 @@ static unsigned int slog (unsigned int block)
 	return 0;
 }
 
+static unsigned long long blog (long long number)
+{
+	unsigned long long i;
+	for (i = 1; i < 64; i++) {
+		if (number < ((long long) 1 << i)) {
+			break;
+		}
+	}
+	return i;
+}
+
 static int output_write (void)
 {
-	ssize_t rc;
 	int fd;
+	ssize_t rc;
+	ssize_t size;
+
 	struct node *node;
 	struct node *nnode;
-	struct smashfs_inode inode;
+
 	struct smashfs_super_block super;
+
+	unsigned char *buffer;
+	long long max_inode_size;
+	long long max_inode_number;
+	long long max_inode_type;
+	long long max_inode_owner_mode;
+	long long max_inode_group_mode;
+	long long max_inode_other_mode;
+	long long max_inode_uid;
+	long long max_inode_gid;
+	long long max_inode_ctime;
+	long long max_inode_mtime;
+	long long min_inode_ctime;
+	long long min_inode_mtime;
+
+	struct bitbuffer bitbuffer;
+
 	fprintf(stdout, "writing file: %s\n", output);
 	fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (fd < 0) {
 		fprintf(stderr, "open failed for: %s\n", output);
 		return -1;
 	}
+
+	max_inode_number     = -1;
+	max_inode_type       = -1;
+	max_inode_owner_mode = -1;
+	max_inode_group_mode = -1;
+	max_inode_other_mode = -1;
+	max_inode_uid        = -1;
+	max_inode_gid        = -1;
+	max_inode_ctime      = -1;
+	max_inode_mtime      = -1;
+	min_inode_ctime      = LONG_LONG_MAX;
+	min_inode_mtime      = LONG_LONG_MAX;
+	HASH_ITER(hh, nodes_table, node, nnode) {
+		max_inode_number     = MAX(max_inode_number, node->number);
+		max_inode_type       = MAX(max_inode_type, node->type);
+		max_inode_owner_mode = MAX(max_inode_owner_mode, node->owner_mode);
+		max_inode_group_mode = MAX(max_inode_group_mode, node->group_mode);
+		max_inode_other_mode = MAX(max_inode_other_mode, node->other_mode);
+		max_inode_uid        = MAX(max_inode_uid, node->uid);
+		max_inode_gid        = MAX(max_inode_gid, node->gid);
+		max_inode_ctime      = MAX(max_inode_ctime, node->ctime);
+		max_inode_mtime      = MAX(max_inode_mtime, node->mtime);
+		min_inode_ctime      = MIN(max_inode_ctime, min_inode_ctime);
+		min_inode_mtime      = MIN(max_inode_mtime, min_inode_mtime);
+	}
+
 	fprintf(stdout, "  writing super block (%zd bytes)\n", sizeof(struct smashfs_super_block));
-	super.magic = SMASHFS_MAGIC;
-	super.version = SMASHFS_VERSION_0;
-	super.ctime = 0;
-	super.block_size = block_size;
-	super.block_log2 = slog(block_size);
-	super.inodes = HASH_CNT(hh, nodes_table);
-	super.root = 0;
+	super.magic                 = SMASHFS_MAGIC;
+	super.version               = SMASHFS_VERSION_0;
+	super.ctime                 = 0;
+	super.block_size            = block_size;
+	super.block_log2            = slog(block_size);
+	super.inodes                = HASH_CNT(hh, nodes_table);
+	super.root                  = 0;
+	max_inode_size       = 0;
+	super.bits.min.ctime        = min_inode_ctime;
+	super.bits.min.mtime        = min_inode_mtime;
+	super.bits.inode.number     = blog(max_inode_number);                  max_inode_size += super.bits.inode.number;
+	super.bits.inode.type       = blog(max_inode_type);                    max_inode_size += super.bits.inode.type;
+	super.bits.inode.owner_mode = blog(max_inode_owner_mode);              max_inode_size += super.bits.inode.owner_mode;
+	super.bits.inode.group_mode = blog(max_inode_group_mode);              max_inode_size += super.bits.inode.group_mode;
+	super.bits.inode.other_mode = blog(max_inode_other_mode);              max_inode_size += super.bits.inode.other_mode;
+	super.bits.inode.uid        = blog(max_inode_uid);                     max_inode_size += super.bits.inode.uid;
+	super.bits.inode.gid        = blog(max_inode_gid);                     max_inode_size += super.bits.inode.gid;
+	super.bits.inode.ctime      = blog(max_inode_ctime - min_inode_ctime); max_inode_size += super.bits.inode.ctime;
+	super.bits.inode.mtime      = blog(max_inode_mtime - min_inode_mtime); max_inode_size += super.bits.inode.mtime;
+
+	fprintf(stdout, "  super block:\n");
+	fprintf(stdout, "    magic     : 0x%08x, %u\n", super.magic, super.magic);
+	fprintf(stdout, "    version   : 0x%08x, %u\n", super.version, super.version);
+	fprintf(stdout, "    ctime     : 0x%08x, %u\n", super.ctime, super.ctime);
+	fprintf(stdout, "    block_size: 0x%08x, %u\n", super.block_size, super.block_size);
+	fprintf(stdout, "    block_log2: 0x%08x, %u\n", super.block_log2, super.block_log2);
+	fprintf(stdout, "    inodes    : 0x%08x, %u\n", super.inodes, super.inodes);
+	fprintf(stdout, "    root      : 0x%08x, %u\n", super.root, super.root);
+	fprintf(stdout, "    min_ctime : 0x%08x, %u\n", super.bits.min.ctime, super.bits.min.ctime);
+	fprintf(stdout, "    min_mtime : 0x%08x, %u\n", super.bits.min.mtime, super.bits.min.mtime);
+	fprintf(stdout, "    bits:\n");
+	fprintf(stdout, "      inode:\n");
+	fprintf(stdout, "        number    : %u\n", super.bits.inode.number);
+	fprintf(stdout, "        type      : %u\n", super.bits.inode.type);
+	fprintf(stdout, "        owner_mode: %u\n", super.bits.inode.owner_mode);
+	fprintf(stdout, "        group_mode: %u\n", super.bits.inode.group_mode);
+	fprintf(stdout, "        other_mode: %u\n", super.bits.inode.other_mode);
+	fprintf(stdout, "        uid       : %u\n", super.bits.inode.uid);
+	fprintf(stdout, "        gid       : %u\n", super.bits.inode.gid);
+	fprintf(stdout, "        ctime     : %u\n", super.bits.inode.ctime);
+	fprintf(stdout, "        mtime     : %u\n", super.bits.inode.mtime);
+
 	rc = write(fd, &super, sizeof(struct smashfs_super_block));
 	if (rc != sizeof(struct smashfs_super_block)) {
 		fprintf(stderr, "write failed for super block\n");
 		close(fd);
 		return -1;
 	}
-	rc = 0;
-	HASH_ITER(hh, nodes_table, node, nnode) {
-		rc += sizeof(struct smashfs_inode);
+
+	max_inode_size  = 0;
+	max_inode_size += super.bits.inode.number;
+	max_inode_size += super.bits.inode.type;
+	max_inode_size += super.bits.inode.owner_mode;
+	max_inode_size += super.bits.inode.group_mode;
+	max_inode_size += super.bits.inode.other_mode;
+	max_inode_size += super.bits.inode.uid;
+	max_inode_size += super.bits.inode.gid;
+	max_inode_size += super.bits.inode.ctime;
+	max_inode_size += super.bits.inode.mtime;
+	size = (super.inodes * max_inode_size + 7) / 8;
+
+	fprintf(stdout, "  filling inodes table\n");
+	buffer = malloc(size);
+	if (buffer == NULL) {
+		fprintf(stderr, "malloc failed\n");
+		close(fd);
+		return -1;
 	}
-	fprintf(stdout, "  writing inodes tables (%zd bytes)\n", rc);
+	memset(buffer, 0, size);
+	bitbuffer_init(&bitbuffer, buffer, size);
 	HASH_ITER(hh, nodes_table, node, nnode) {
-		memset(&inode, 0, sizeof(struct smashfs_inode));
-		inode.number = node->number;
-		inode.type = node->type;
-		inode.owner_mode = node->owner_mode;
-		inode.group_mode = node->group_mode;
-		inode.other_mode = node->other_mode;
-		inode.uid = node->uid;
-		inode.gid = node->gid;
-		rc = write(fd, &inode, sizeof(struct smashfs_inode));
-		if (rc != sizeof(struct smashfs_inode)) {
-			fprintf(stderr, "write failed for inode: %lld\n", node->number);
-			close(fd);
-			return -1;
-		}
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.number    , node->number);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.type      , node->type);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.owner_mode, node->owner_mode);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.group_mode, node->group_mode);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.other_mode, node->other_mode);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.uid       , node->uid);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.gid       , node->gid);
 	}
-	rc = 0;
-	HASH_ITER(hh, nodes_table, node, nnode) {
-		if (node->type == smashfs_inode_type_regular_file) {
-			rc += sizeof(struct smashfs_inode_regular_file);
-			rc += node->regular_file->size;
-		}
-		if (node->type == smashfs_inode_type_directory) {
-			unsigned long long e;
-			unsigned long long s;
-			struct node_directory_entry *directory_entry;
-			s = sizeof(struct node_directory);
-			rc += sizeof(struct smashfs_inode_directory);
-			for (e = 0; e < node->directory->nentries; e++) {
-				directory_entry = (struct node_directory_entry *) (((unsigned char *) node->directory) + s);
-				s += sizeof(struct node_directory_entry) + strlen(directory_entry->name) + 1;
-				rc += sizeof(struct smashfs_inode_directory_entry) + strlen(directory_entry->name) + 1;
-			}
-		}
-		if (node->type == smashfs_inode_type_symbolic_link) {
-			rc += sizeof(struct smashfs_inode_symbolic_link);
-			rc += strlen(node->symbolic_link->path) + 1;
-		}
+	bitbuffer_uninit(&bitbuffer);
+	fprintf(stdout, "  writing inodes tables (%zd bytes)\n", size);
+	rc = write(fd, buffer, size);
+	if (rc != size) {
+		fprintf(stdout, "write failed\n");
+		free(buffer);
+		close(fd);
+		return -1;
 	}
-	fprintf(stdout, "  writing blocks (%zd bytes)\n", rc);
+	free(buffer);
 	close(fd);
 	return 0;
 }
@@ -272,13 +362,15 @@ static struct node * node_new (FTSENT *entry)
 	}
 	node->uid = stbuf->st_uid;
 	node->gid = stbuf->st_gid;
+	node->ctime = stbuf->st_ctime;
+	node->mtime = stbuf->st_mtime;
 	if (node->type == smashfs_inode_type_regular_file) {
 		fd = open(entry->fts_accpath, O_RDONLY);
 		if (fd < 0) {
 			fprintf(stderr, "open failed\n");
 			goto bail;
 		}
-#if 1
+#if 0
 		node->regular_file = malloc(sizeof(struct node_regular_file) + stbuf->st_size);
 		if (node->regular_file == NULL) {
 			fprintf(stderr, "malloc failed\n");
@@ -458,7 +550,7 @@ static void sources_scan (void)
 					  "?",
 					entry->fts_name,
 					node->number,
-					(parent != NULL) ? parent->number : (unsigned long long) -1);
+					(parent != NULL) ? parent->number : -1);
 		}
 	}
 	fts_close(tree);
