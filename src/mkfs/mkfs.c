@@ -544,7 +544,6 @@ static struct node * node_new (FTSENT *entry)
 			fprintf(stderr, "open failed\n");
 			goto bail;
 		}
-#if 1
 		node->regular_file = malloc(sizeof(struct node_regular_file) + stbuf->st_size);
 		if (node->regular_file == NULL) {
 			fprintf(stderr, "malloc failed\n");
@@ -556,7 +555,6 @@ static struct node * node_new (FTSENT *entry)
 			fprintf(stderr, "read failed\n");
 			goto bail;
 		}
-#if 1
 		HASH_ITER(hh, nodes_table, dnode, ndnode) {
 			if (dnode->type != smashfs_inode_type_regular_file) {
 				continue;
@@ -573,16 +571,6 @@ static struct node * node_new (FTSENT *entry)
 			duplicate = 1;
 			break;
 		}
-#endif
-#else
-		node->regular_file = malloc(sizeof(struct node_regular_file) + strlen(entry->fts_accpath) + 1);
-		if (node->regular_file == NULL) {
-			fprintf(stderr, "malloc failed\n");
-			goto bail;
-		}
-		node->regular_file->size = strlen(entry->fts_accpath) + 1;
-		memcpy(node->regular_file->content, entry->fts_accpath, strlen(entry->fts_accpath) + 1);
-#endif
 		close(fd);
 		fd = -1;
 	} else if (node->type == smashfs_inode_type_directory) {
