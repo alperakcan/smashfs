@@ -186,12 +186,12 @@ static int output_write (void)
 	long long max_inode_gid;
 	long long max_inode_ctime;
 	long long max_inode_mtime;
-
-	long long max_inode_regular_file_size;
+	long long max_inode_block;
+	long long max_inode_index;
 
 	long long max_inode_directory_parent;
 	long long max_inode_directory_nentries;
-	long long max_inode_directory_entry_number;
+	long long max_inode_directory_entries_number;
 
 	struct buffer inode_buffer;
 	struct buffer entry_buffer;
@@ -200,7 +200,7 @@ static int output_write (void)
 
 	fprintf(stdout, "writing file: %s\n", output);
 
-	fprintf(stdout, "  calculating super max/min bits\n");
+	fprintf(stdout, "  calculating super max/min bits (1/2)\n");
 
 	min_inode_ctime      = LONG_LONG_MAX;
 	min_inode_mtime      = LONG_LONG_MAX;
@@ -215,11 +215,9 @@ static int output_write (void)
 	max_inode_ctime      = -1;
 	max_inode_mtime      = -1;
 
-	max_inode_regular_file_size = -1;
-
 	max_inode_directory_parent       = -1;
 	max_inode_directory_nentries     = -1;
-	max_inode_directory_entry_number = -1;
+	max_inode_directory_entries_number = -1;
 
 	HASH_ITER(hh, nodes_table, node, nnode) {
 		max_inode_number     = MAX(max_inode_number, node->number);
@@ -234,19 +232,21 @@ static int output_write (void)
 		min_inode_ctime      = MIN(max_inode_ctime, min_inode_ctime);
 		min_inode_mtime      = MIN(max_inode_mtime, min_inode_mtime);
 		if (node->type == smashfs_inode_type_regular_file) {
-			max_inode_regular_file_size = MAX(max_inode_regular_file_size, node->regular_file->size);
 		} else if (node->type == smashfs_inode_type_directory) {
 			max_inode_directory_parent   = MAX(max_inode_directory_parent  , node->directory->parent);
 			max_inode_directory_nentries = MAX(max_inode_directory_nentries, node->directory->nentries);
 			size = sizeof(struct node_directory);
 			for (e = 0; e < node->directory->nentries; e++) {
-				max_inode_directory_entry_number = MAX(max_inode_directory_entry_number, ((struct node_directory_entry *) (((unsigned char *) node->directory) + size))->number);
+				max_inode_directory_entries_number = MAX(max_inode_directory_entries_number, ((struct node_directory_entry *) (((unsigned char *) node->directory) + size))->number);
 				size += sizeof(struct node_directory_entry) + strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + size))->name) + 1;
 			}
+		} else if (node->type == smashfs_inode_type_symbolic_link) {
+		} else {
+			fprintf(stderr, "unknown type: %lld\n", node->type);
 		}
 	}
 
-	fprintf(stdout, "  filling super block\n");
+	fprintf(stdout, "  setting super block (1/2)\n");
 
 	super.magic      = SMASHFS_MAGIC;
 	super.version    = SMASHFS_VERSION_0;
@@ -269,43 +269,9 @@ static int output_write (void)
 	super.bits.inode.ctime      = blog(max_inode_ctime - min_inode_ctime);
 	super.bits.inode.mtime      = blog(max_inode_mtime - min_inode_mtime);
 
-	super.bits.inode.regular_file.size = blog(max_inode_regular_file_size);
-
-	super.bits.inode.directory.parent       = blog(max_inode_directory_parent);
-	super.bits.inode.directory.nentries     = blog(max_inode_directory_nentries);
-	super.bits.inode.directory.entry.number = blog(max_inode_directory_entry_number);
-
-	if (debug) {
-		fprintf(stdout, "  super block:\n");
-		fprintf(stdout, "    magic     : 0x%08x, %u\n", super.magic, super.magic);
-		fprintf(stdout, "    version   : 0x%08x, %u\n", super.version, super.version);
-		fprintf(stdout, "    ctime     : 0x%08x, %u\n", super.ctime, super.ctime);
-		fprintf(stdout, "    block_size: 0x%08x, %u\n", super.block_size, super.block_size);
-		fprintf(stdout, "    block_log2: 0x%08x, %u\n", super.block_log2, super.block_log2);
-		fprintf(stdout, "    inodes    : 0x%08x, %u\n", super.inodes, super.inodes);
-		fprintf(stdout, "    root      : 0x%08x, %u\n", super.root, super.root);
-		fprintf(stdout, "    bits:\n");
-		fprintf(stdout, "      min:\n");
-		fprintf(stdout, "        ctime : 0x%08x, %u\n", super.min.inode.ctime, super.min.inode.ctime);
-		fprintf(stdout, "        mtime : 0x%08x, %u\n", super.min.inode.mtime, super.min.inode.mtime);
-		fprintf(stdout, "      inode:\n");
-		fprintf(stdout, "        number    : %u\n", super.bits.inode.number);
-		fprintf(stdout, "        type      : %u\n", super.bits.inode.type);
-		fprintf(stdout, "        owner_mode: %u\n", super.bits.inode.owner_mode);
-		fprintf(stdout, "        group_mode: %u\n", super.bits.inode.group_mode);
-		fprintf(stdout, "        other_mode: %u\n", super.bits.inode.other_mode);
-		fprintf(stdout, "        uid       : %u\n", super.bits.inode.uid);
-		fprintf(stdout, "        gid       : %u\n", super.bits.inode.gid);
-		fprintf(stdout, "        ctime     : %u\n", super.bits.inode.ctime);
-		fprintf(stdout, "        mtime     : %u\n", super.bits.inode.mtime);
-		fprintf(stdout, "        regular_file:\n");
-		fprintf(stdout, "          size : %u\n", super.bits.inode.regular_file.size);
-		fprintf(stdout, "        directory:\n");
-		fprintf(stdout, "          parent   : %u\n", super.bits.inode.directory.parent);
-		fprintf(stdout, "          nentries : %u\n", super.bits.inode.directory.nentries);
-		fprintf(stdout, "          entry:\n");
-		fprintf(stdout, "            number : %u\n", super.bits.inode.directory.entry.number);
-	}
+	super.bits.inode.directory.parent         = blog(max_inode_directory_parent);
+	super.bits.inode.directory.nentries       = blog(max_inode_directory_nentries);
+	super.bits.inode.directory.entries.number = blog(max_inode_directory_entries_number);
 
 	fprintf(stdout, "  sorting inodes table by type\n");
 	HASH_SRT(hh, nodes_table, nodes_sort_by_type);
@@ -315,24 +281,6 @@ static int output_write (void)
 	buffer_init(&entry_buffer);
 	HASH_ITER(hh, nodes_table, node, nnode) {
 		if (node->type == smashfs_inode_type_regular_file) {
-			size  = 0;
-			size += super.bits.inode.regular_file.size;
-			size  = (size + 7) / 8;
-			rc = bitbuffer_init(&bitbuffer, size);
-			if (rc != 0) {
-				fprintf(stderr, "bitbuffer init failed\n");
-				buffer_uninit(&entry_buffer);
-				return -1;
-			}
-			bitbuffer_putbits(&bitbuffer, super.bits.inode.regular_file.size, node->regular_file->size);
-			rc = buffer_add(&entry_buffer, bitbuffer_buffer(&bitbuffer), size);
-			if (rc < 0) {
-				fprintf(stdout, "buffer add failed\n");
-				bitbuffer_uninit(&bitbuffer);
-				buffer_uninit(&entry_buffer);
-				return -1;
-			}
-			node->size = rc;
 			bitbuffer_uninit(&bitbuffer);
 			rc = buffer_add(&entry_buffer, node->regular_file->content, node->regular_file->size);
 			if (rc < 0) {
@@ -340,7 +288,7 @@ static int output_write (void)
 				buffer_uninit(&entry_buffer);
 				return -1;
 			}
-			node->size += rc;
+			node->size = rc;
 			index = offset & ((1 << super.block_log2) - 1);
 			block = offset >> super.block_log2;
 			node->block = block;
@@ -368,18 +316,18 @@ static int output_write (void)
 			}
 			node->size = rc;
 			bitbuffer_uninit(&bitbuffer);
-			size  = 0;
-			size += super.bits.inode.directory.entry.number;
-			size  = (size + 7) / 8;
 			s = sizeof(struct node_directory);
 			for (e = 0; e < node->directory->nentries; e++) {
+				size  = 0;
+				size += super.bits.inode.directory.entries.number;
+				size  = (size + 7) / 8;
 				rc = bitbuffer_init(&bitbuffer, size);
 				if (rc != 0) {
 					fprintf(stderr, "bitbuffer init failed\n");
 					buffer_uninit(&entry_buffer);
 					return -1;
 				}
-				bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.entry.number, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->number);
+				bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.entries.number, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->number);
 				rc = buffer_add(&entry_buffer, bitbuffer_buffer(&bitbuffer), size);
 				if (rc < 0) {
 					fprintf(stdout, "buffer add failed\n");
@@ -422,6 +370,23 @@ static int output_write (void)
 		}
 	}
 
+	fprintf(stdout, "  calculating super max/min bits (2/2)\n");
+
+	max_inode_size  = -1;
+	max_inode_block = -1;
+	max_inode_index = -1;
+	HASH_ITER(hh, nodes_table, node, nnode) {
+		max_inode_size  = MAX(max_inode_size, node->size);
+		max_inode_block = MAX(max_inode_block, node->block);
+		max_inode_index = MAX(max_inode_index, node->index);
+	}
+
+	fprintf(stdout, "  setting super block (2/2)\n");
+
+	super.bits.inode.size  = blog(max_inode_size);
+	super.bits.inode.block = blog(max_inode_block);
+	super.bits.inode.index = blog(max_inode_index);
+
 	fprintf(stdout, "  calculating inode size\n");
 
 	max_inode_size  = 0;
@@ -434,6 +399,9 @@ static int output_write (void)
 	max_inode_size += super.bits.inode.gid;
 	max_inode_size += super.bits.inode.ctime;
 	max_inode_size += super.bits.inode.mtime;
+	max_inode_size += super.bits.inode.size;
+	max_inode_size += super.bits.inode.block;
+	max_inode_size += super.bits.inode.index;
 	size = (super.inodes * max_inode_size + 7) / 8;
 
 	fprintf(stdout, "  sorting inodes table by number\n");
@@ -459,6 +427,9 @@ static int output_write (void)
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.gid       , node->gid);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.ctime     , node->ctime - super.min.inode.ctime);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.mtime     , node->mtime - super.min.inode.mtime);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.size      , node->size);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.block     , node->block);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.index     , node->index);
 	}
 	rc = buffer_add(&inode_buffer, bitbuffer_buffer(&bitbuffer), size);
 	if (rc < 0) {
@@ -471,6 +442,41 @@ static int output_write (void)
 	bitbuffer_uninit(&bitbuffer);
 
 	fprintf(stdout, "  filling super block\n");
+
+	if (debug) {
+		fprintf(stdout, "  super block:\n");
+		fprintf(stdout, "    magic     : 0x%08x, %u\n", super.magic, super.magic);
+		fprintf(stdout, "    version   : 0x%08x, %u\n", super.version, super.version);
+		fprintf(stdout, "    ctime     : 0x%08x, %u\n", super.ctime, super.ctime);
+		fprintf(stdout, "    block_size: 0x%08x, %u\n", super.block_size, super.block_size);
+		fprintf(stdout, "    block_log2: 0x%08x, %u\n", super.block_log2, super.block_log2);
+		fprintf(stdout, "    inodes    : 0x%08x, %u\n", super.inodes, super.inodes);
+		fprintf(stdout, "    root      : 0x%08x, %u\n", super.root, super.root);
+		fprintf(stdout, "    bits:\n");
+		fprintf(stdout, "      min:\n");
+		fprintf(stdout, "        ctime : 0x%08x, %u\n", super.min.inode.ctime, super.min.inode.ctime);
+		fprintf(stdout, "        mtime : 0x%08x, %u\n", super.min.inode.mtime, super.min.inode.mtime);
+		fprintf(stdout, "      inode:\n");
+		fprintf(stdout, "        number    : %u\n", super.bits.inode.number);
+		fprintf(stdout, "        type      : %u\n", super.bits.inode.type);
+		fprintf(stdout, "        owner_mode: %u\n", super.bits.inode.owner_mode);
+		fprintf(stdout, "        group_mode: %u\n", super.bits.inode.group_mode);
+		fprintf(stdout, "        other_mode: %u\n", super.bits.inode.other_mode);
+		fprintf(stdout, "        uid       : %u\n", super.bits.inode.uid);
+		fprintf(stdout, "        gid       : %u\n", super.bits.inode.gid);
+		fprintf(stdout, "        ctime     : %u\n", super.bits.inode.ctime);
+		fprintf(stdout, "        mtime     : %u\n", super.bits.inode.mtime);
+		fprintf(stdout, "        size      : %u\n", super.bits.inode.size);
+		fprintf(stdout, "        block     : %u\n", super.bits.inode.block);
+		fprintf(stdout, "        index     : %u\n", super.bits.inode.index);
+		fprintf(stdout, "        regular_file:\n");
+		fprintf(stdout, "        directory:\n");
+		fprintf(stdout, "          parent   : %u\n", super.bits.inode.directory.parent);
+		fprintf(stdout, "          nentries : %u\n", super.bits.inode.directory.nentries);
+		fprintf(stdout, "          entries:\n");
+		fprintf(stdout, "            number : %u\n", super.bits.inode.directory.entries.number);
+		fprintf(stdout, "        symbolic_link:\n");
+	}
 
 	buffer_init(&super_buffer);
 	rc = buffer_add(&super_buffer, &super, sizeof(struct smashfs_super_block));
@@ -486,6 +492,7 @@ static int output_write (void)
 	fprintf(stdout, "    super: %lld bytes\n", buffer_length(&super_buffer));
 	fprintf(stdout, "    inode: %lld bytes\n", buffer_length(&inode_buffer));
 	fprintf(stdout, "    entry: %lld bytes\n", buffer_length(&entry_buffer));
+	fprintf(stdout, "    total: %lld bytes\n", buffer_length(&super_buffer) + buffer_length(&inode_buffer) + buffer_length(&entry_buffer));
 
 	buffer_uninit(&super_buffer);
 	buffer_uninit(&inode_buffer);
