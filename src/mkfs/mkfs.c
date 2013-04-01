@@ -482,9 +482,11 @@ static int output_write (void)
 		return -1;
 	}
 
-	fprintf(stdout, "super: %lld bytes\n", buffer_length(&super_buffer));
-	fprintf(stdout, "inode: %lld bytes\n", buffer_length(&inode_buffer));
-	fprintf(stdout, "entry: %lld bytes\n", buffer_length(&entry_buffer));
+	fprintf(stdout, "  buffers:\n");
+	fprintf(stdout, "    super: %lld bytes\n", buffer_length(&super_buffer));
+	fprintf(stdout, "    inode: %lld bytes\n", buffer_length(&inode_buffer));
+	fprintf(stdout, "    entry: %lld bytes\n", buffer_length(&entry_buffer));
+
 	buffer_uninit(&super_buffer);
 	buffer_uninit(&inode_buffer);
 	buffer_uninit(&entry_buffer);
