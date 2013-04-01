@@ -121,6 +121,9 @@ static unsigned int slog (unsigned int block)
 static unsigned long long blog (long long number)
 {
 	unsigned long long i;
+	if (number < 0) {
+		return 0;
+	}
 	for (i = 1; i < 64; i++) {
 		if (number < ((long long) 1 << i)) {
 			break;
@@ -197,8 +200,8 @@ static int output_write (void)
 	super.inodes                = HASH_CNT(hh, nodes_table);
 	super.root                  = 0;
 	max_inode_size       = 0;
-	super.bits.min.ctime        = min_inode_ctime;
-	super.bits.min.mtime        = min_inode_mtime;
+	super.min.inode.ctime       = min_inode_ctime;
+	super.min.inode.mtime       = min_inode_mtime;
 	super.bits.inode.number     = blog(max_inode_number);                  max_inode_size += super.bits.inode.number;
 	super.bits.inode.type       = blog(max_inode_type);                    max_inode_size += super.bits.inode.type;
 	super.bits.inode.owner_mode = blog(max_inode_owner_mode);              max_inode_size += super.bits.inode.owner_mode;
@@ -217,8 +220,8 @@ static int output_write (void)
 	fprintf(stdout, "    block_log2: 0x%08x, %u\n", super.block_log2, super.block_log2);
 	fprintf(stdout, "    inodes    : 0x%08x, %u\n", super.inodes, super.inodes);
 	fprintf(stdout, "    root      : 0x%08x, %u\n", super.root, super.root);
-	fprintf(stdout, "    min_ctime : 0x%08x, %u\n", super.bits.min.ctime, super.bits.min.ctime);
-	fprintf(stdout, "    min_mtime : 0x%08x, %u\n", super.bits.min.mtime, super.bits.min.mtime);
+	fprintf(stdout, "    min_ctime : 0x%08x, %u\n", super.min.inode.ctime, super.min.inode.ctime);
+	fprintf(stdout, "    min_mtime : 0x%08x, %u\n", super.min.inode.mtime, super.min.inode.mtime);
 	fprintf(stdout, "    bits:\n");
 	fprintf(stdout, "      inode:\n");
 	fprintf(stdout, "        number    : %u\n", super.bits.inode.number);
@@ -267,6 +270,8 @@ static int output_write (void)
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.other_mode, node->other_mode);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.uid       , node->uid);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.gid       , node->gid);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.ctime     , node->ctime - super.min.inode.ctime);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.mtime     , node->mtime - super.min.inode.mtime);
 	}
 	bitbuffer_uninit(&bitbuffer);
 	fprintf(stdout, "  writing inodes tables (%zd bytes)\n", size);
@@ -277,6 +282,7 @@ static int output_write (void)
 		close(fd);
 		return -1;
 	}
+
 	free(buffer);
 	close(fd);
 	return 0;

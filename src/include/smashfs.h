@@ -61,10 +61,6 @@ struct smashfs_super_block {
 	uint32_t root;
 	struct {
 		struct {
-			uint32_t ctime;
-			uint32_t mtime;
-		} min;
-		struct {
 			uint32_t number;
 			uint32_t type;
 			uint32_t owner_mode;
@@ -76,4 +72,10 @@ struct smashfs_super_block {
 			uint32_t mtime;
 		} inode;
 	} bits;
+	struct {
+		struct {
+			uint32_t ctime;
+			uint32_t mtime;
+		} inode;
+	} min;
 } __attribute__((packed));
