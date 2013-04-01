@@ -224,6 +224,7 @@ static struct node * node_new (FTSENT *entry)
 			fprintf(stderr, "open failed\n");
 			goto bail;
 		}
+#if 0
 		node->regular_file = malloc(sizeof(struct node_regular_file) + stbuf->st_size);
 		if (node->regular_file == NULL) {
 			fprintf(stderr, "malloc failed\n");
@@ -235,6 +236,15 @@ static struct node * node_new (FTSENT *entry)
 			fprintf(stderr, "read failed\n");
 			goto bail;
 		}
+#else
+		node->regular_file = malloc(sizeof(struct node_regular_file) + strlen(entry->fts_accpath) + 1);
+		if (node->regular_file == NULL) {
+			fprintf(stderr, "malloc failed\n");
+			goto bail;
+		}
+		node->regular_file->size = strlen(entry->fts_accpath) + 1;
+		memcpy(node->regular_file->content, entry->fts_accpath, strlen(entry->fts_accpath) + 1);
+#endif
 		close(fd);
 	} else if (node->type == smashfs_inode_type_directory) {
 		node->directory = malloc(sizeof(struct node_directory));
