@@ -600,7 +600,7 @@ static struct node * node_new (FTSENT *entry)
 		node->regular_file->size = stbuf->st_size;
 		r = read(fd, node->regular_file->content, node->regular_file->size);
 		if (r != (ssize_t) node->regular_file->size) {
-			fprintf(stderr, "read failed\n");
+			fprintf(stderr, "read failed path: %s, size %lld, ret: %zd\n", entry->fts_accpath, node->regular_file->size, r);
 			goto bail;
 		}
 		HASH_ITER(hh, nodes_table, dnode, ndnode) {
