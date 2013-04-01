@@ -74,6 +74,10 @@ struct node_directory {
 	struct node_directory_entry entries[0];
 };
 
+struct node_symbolic_link {
+	char path[0];
+};
+
 struct node {
 	unsigned long long number;
 	unsigned long long type;
@@ -86,6 +90,7 @@ struct node {
 		void *pointer;
 		struct node_regular_file *regular_file;
 		struct node_directory *directory;
+		struct node_symbolic_link *symbolic_link;
 	};
 	UT_hash_handle hh;
 };
@@ -112,8 +117,11 @@ static unsigned int slog (unsigned int block)
 
 static int output_write (void)
 {
-	int rc;
+	ssize_t rc;
 	int fd;
+	struct node *node;
+	struct node *nnode;
+	struct smashfs_inode inode;
 	struct smashfs_super_block super;
 	fprintf(stdout, "writing file: %s\n", output);
 	fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -127,7 +135,7 @@ static int output_write (void)
 	super.ctime = 0;
 	super.block_size = block_size;
 	super.block_log2 = slog(block_size);
-	super.inodes = 0;
+	super.inodes = HASH_CNT(hh, nodes_table);
 	super.root = 0;
 	rc = write(fd, &super, sizeof(struct smashfs_super_block));
 	if (rc != sizeof(struct smashfs_super_block)) {
@@ -135,6 +143,51 @@ static int output_write (void)
 		close(fd);
 		return -1;
 	}
+	rc = 0;
+	HASH_ITER(hh, nodes_table, node, nnode) {
+		rc += sizeof(struct smashfs_inode);
+	}
+	fprintf(stdout, "  writing inodes tables (%zd bytes)\n", rc);
+	HASH_ITER(hh, nodes_table, node, nnode) {
+		memset(&inode, 0, sizeof(struct smashfs_inode));
+		inode.number = node->number;
+		inode.type = node->type;
+		inode.owner_mode = node->owner_mode;
+		inode.group_mode = node->group_mode;
+		inode.other_mode = node->other_mode;
+		inode.uid = node->uid;
+		inode.gid = node->gid;
+		rc = write(fd, &inode, sizeof(struct smashfs_inode));
+		if (rc != sizeof(struct smashfs_inode)) {
+			fprintf(stderr, "write failed for inode: %lld\n", node->number);
+			close(fd);
+			return -1;
+		}
+	}
+	rc = 0;
+	HASH_ITER(hh, nodes_table, node, nnode) {
+		if (node->type == smashfs_inode_type_regular_file) {
+			rc += sizeof(struct smashfs_inode_regular_file);
+			rc += node->regular_file->size;
+		}
+		if (node->type == smashfs_inode_type_directory) {
+			unsigned long long e;
+			unsigned long long s;
+			struct node_directory_entry *directory_entry;
+			s = sizeof(struct node_directory);
+			rc += sizeof(struct smashfs_inode_directory);
+			for (e = 0; e < node->directory->nentries; e++) {
+				directory_entry = (struct node_directory_entry *) (((unsigned char *) node->directory) + s);
+				s += sizeof(struct node_directory_entry) + strlen(directory_entry->name) + 1;
+				rc += sizeof(struct smashfs_inode_directory_entry) + strlen(directory_entry->name) + 1;
+			}
+		}
+		if (node->type == smashfs_inode_type_symbolic_link) {
+			rc += sizeof(struct smashfs_inode_symbolic_link);
+			rc += strlen(node->symbolic_link->path) + 1;
+		}
+	}
+	fprintf(stdout, "  writing blocks (%zd bytes)\n", rc);
 	close(fd);
 	return 0;
 }
@@ -150,6 +203,7 @@ static int node_delete (struct node *node)
 static struct node * node_new (FTSENT *entry)
 {
 	int fd;
+	ssize_t r;
 	struct node *node;
 	struct stat *stbuf;
 	struct node *parent;
@@ -224,15 +278,15 @@ static struct node * node_new (FTSENT *entry)
 			fprintf(stderr, "open failed\n");
 			goto bail;
 		}
-#if 0
+#if 1
 		node->regular_file = malloc(sizeof(struct node_regular_file) + stbuf->st_size);
 		if (node->regular_file == NULL) {
 			fprintf(stderr, "malloc failed\n");
 			goto bail;
 		}
 		node->regular_file->size = stbuf->st_size;
-		s = read(fd, node->regular_file->content, node->regular_file->size);
-		if (s != node->regular_file->size) {
+		r = read(fd, node->regular_file->content, node->regular_file->size);
+		if (r != (ssize_t) node->regular_file->size) {
 			fprintf(stderr, "read failed\n");
 			goto bail;
 		}
@@ -259,6 +313,22 @@ static struct node * node_new (FTSENT *entry)
 			goto out;
 		}
 		node->directory->parent = parent->number;
+	} else if (node->type == smashfs_inode_type_symbolic_link) {
+		node->symbolic_link = malloc(sizeof(struct node_symbolic_link) + stbuf->st_size + 1);
+		if (node->symbolic_link == NULL) {
+			fprintf(stderr, "malloc failed\n");
+			goto bail;
+		}
+		r = readlink(entry->fts_accpath, node->symbolic_link->path, stbuf->st_size);
+		if (r < 0) {
+			fprintf(stderr, "readlink failed\n");
+			goto bail;
+		}
+		if (r > stbuf->st_size) {
+			fprintf(stderr, "readlink failed\n");
+			goto bail;
+		}
+		node->symbolic_link->path[r] = '\0';
 	} else {
 		fprintf(stderr, "unknown node type: %lld\n", node->type);
 		goto bail;

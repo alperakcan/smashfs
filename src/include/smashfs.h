@@ -99,7 +99,7 @@ struct smashfs_super_block {
 	uint32_t block_size;
 	uint32_t block_log2;
 	uint32_t root;
-};
+} __attribute__((packed));
 
 struct smashfs_inode {
 	uint64_t number				: SMASHFS_INODE_NUMBER_LENGTH;
@@ -109,14 +109,15 @@ struct smashfs_inode {
 	uint64_t other_mode			: SMASHFS_INODE_MODE_LENGTH;
 	uint64_t uid				: SMASHFS_INODE_UID_LENGTH;
 	uint64_t gid				: SMASHFS_INODE_GID_LENGTH;
-	uint64_t size				: SMASHFS_INODE_SIZE_LENGTH;
 #if (SMASHFS_INODE_PADDING_LENGTH > 0)
 	uint64_t padding			: SMASHFS_INODE_PADDING_LENGTH;
 #endif
 } __attribute__((packed));
 
 struct smashfs_inode_regular_file {
-};
+	uint64_t size				: SMASHFS_INODE_SIZE_LENGTH;
+	char content[0];
+} __attribute__((packed));
 
 struct smashfs_inode_directory_entry {
 	uint64_t number				: SMASHFS_INODE_NUMBER_LENGTH;
@@ -127,19 +128,20 @@ struct smashfs_inode_directory {
 	uint64_t parent				: SMASHFS_INODE_NUMBER_LENGTH;
 	uint64_t nentries			: SMASHFS_INODE_DIRECTORY_ENTRIES_LENGTH;
 	struct smashfs_inode_directory_entry entries[0];
-};
+} __attribute__((packed));
 
 struct smashfs_inode_character_device {
-};
+} __attribute__((packed));
 
 struct smashfs_inode_block_device {
-};
+} __attribute__((packed));
 
 struct smashfs_inode_symbolic_link {
-};
+	char path[0];
+} __attribute__((packed));
 
 struct smashfs_inode_fifo {
-};
+} __attribute__((packed));
 
 struct smashfs_inode_socket {
-};
+} __attribute__((packed));
