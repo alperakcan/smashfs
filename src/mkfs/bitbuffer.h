@@ -8,10 +8,13 @@ struct bitbuffer {
 	int size;
 	int bsize;
 	int index;
+	int external;
 };
 
-int bitbuffer_init (struct bitbuffer *bitbuffer, unsigned char *buffer, int size);
+int bitbuffer_init (struct bitbuffer *bitbuffer, int size);
+int bitbuffer_init_from_buffer (struct bitbuffer *bitbuffer, unsigned char *buffer, int size);
 void bitbuffer_uninit (struct bitbuffer *bitbuffer);
+void * bitbuffer_buffer (struct bitbuffer *bitbuffer);
 unsigned int bitbuffer_getlength (struct bitbuffer *bitbuffer);
 unsigned int bitbuffer_getbitlength (struct bitbuffer *bitbuffer);
 unsigned int bitbuffer_getpos (struct bitbuffer *bitbuffer);

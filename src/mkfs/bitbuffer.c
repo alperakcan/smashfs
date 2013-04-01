@@ -2,13 +2,35 @@
  * Alper Akcan - 14.09.2011
  */
 
+#include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "bitbuffer.h"
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 
-int bitbuffer_init (struct bitbuffer *bitbuffer, unsigned char *buffer, int size)
+int bitbuffer_init (struct bitbuffer *bitbuffer, int size)
+{
+	struct bitbuffer *b;
+	unsigned char *buffer;
+	buffer = malloc(size);
+	if (buffer == NULL) {
+		fprintf(stderr, "malloc failed\n");
+		return -1;
+	}
+	memset(buffer, 0, size);
+	b = bitbuffer;
+	b->buffer = buffer;
+	b->size = size;
+	b->bsize = size * 8;
+	b->end = buffer + b->size;
+	b->index = 0;
+	b->external = 0;
+	return 0;
+}
+
+int bitbuffer_init_from_buffer (struct bitbuffer *bitbuffer, unsigned char *buffer, int size)
 {
 	struct bitbuffer *b;
 	b = bitbuffer;
@@ -17,12 +39,21 @@ int bitbuffer_init (struct bitbuffer *bitbuffer, unsigned char *buffer, int size
 	b->bsize = size * 8;
 	b->end = buffer + b->size;
 	b->index = 0;
+	b->external = 1;
 	return 0;
 }
 
 void bitbuffer_uninit (struct bitbuffer *bitbuffer)
 {
+	if (bitbuffer->external == 0) {
+		free(bitbuffer->buffer);
+	}
 	(void) bitbuffer;
+}
+
+void * bitbuffer_buffer (struct bitbuffer *bitbuffer)
+{
+	return bitbuffer->buffer;
 }
 
 unsigned int bitbuffer_getlength (struct bitbuffer *bitbuffer)

@@ -45,6 +45,7 @@
 #include "../include/smashfs.h"
 
 #include "uthash.h"
+#include "buffer.h"
 #include "bitbuffer.h"
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -89,6 +90,9 @@ struct node {
 	long long gid;
 	long long ctime;
 	long long mtime;
+	long long size;
+	long long block;
+	long long index;
 	union {
 		void *pointer;
 		struct node_regular_file *regular_file;
@@ -101,9 +105,9 @@ struct node {
 static LIST_HEAD(sources, source) sources;
 
 static unsigned long long nduplicates		= 0;
-static unsigned long long nregular_files                = 0;
-static unsigned long long ndirectories          = 0;
-static unsigned long long nsymbolic_links       = 0;
+static unsigned long long nregular_files	= 0;
+static unsigned long long ndirectories		= 0;
+static unsigned long long nsymbolic_links	= 0;
 static unsigned long long nodes_id		= 0;
 static struct node *nodes_table			= NULL;
 
@@ -154,7 +158,6 @@ static int nodes_sort_by_type (struct node *a, struct node *b)
 
 static int output_write (void)
 {
-	int fd;
 	ssize_t rc;
 	ssize_t size;
 
@@ -166,7 +169,9 @@ static int output_write (void)
 
 	struct smashfs_super_block super;
 
-	unsigned char *buffer;
+	long long offset;
+	long long index;
+	long long block;
 
 	long long min_inode_ctime;
 	long long min_inode_mtime;
@@ -188,14 +193,14 @@ static int output_write (void)
 	long long max_inode_directory_nentries;
 	long long max_inode_directory_entry_number;
 
+	struct buffer inode_buffer;
+	struct buffer entry_buffer;
+	struct buffer super_buffer;
 	struct bitbuffer bitbuffer;
 
 	fprintf(stdout, "writing file: %s\n", output);
-	fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-	if (fd < 0) {
-		fprintf(stderr, "open failed for: %s\n", output);
-		return -1;
-	}
+
+	fprintf(stdout, "  calculating super max/min bits\n");
 
 	min_inode_ctime      = LONG_LONG_MAX;
 	min_inode_mtime      = LONG_LONG_MAX;
@@ -302,14 +307,122 @@ static int output_write (void)
 		fprintf(stdout, "            number : %u\n", super.bits.inode.directory.entry.number);
 	}
 
-	fprintf(stdout, "  writing super block (%zd bytes)\n", sizeof(struct smashfs_super_block));
+	fprintf(stdout, "  sorting inodes table by type\n");
+	HASH_SRT(hh, nodes_table, nodes_sort_by_type);
 
-	rc = write(fd, &super, sizeof(struct smashfs_super_block));
-	if (rc != sizeof(struct smashfs_super_block)) {
-		fprintf(stderr, "write failed for super block\n");
-		close(fd);
-		return -1;
+	fprintf(stdout, "  filling entry blocks\n");
+	offset = 0;
+	buffer_init(&entry_buffer);
+	HASH_ITER(hh, nodes_table, node, nnode) {
+		if (node->type == smashfs_inode_type_regular_file) {
+			size  = 0;
+			size += super.bits.inode.regular_file.size;
+			size  = (size + 7) / 8;
+			rc = bitbuffer_init(&bitbuffer, size);
+			if (rc != 0) {
+				fprintf(stderr, "bitbuffer init failed\n");
+				buffer_uninit(&entry_buffer);
+				return -1;
+			}
+			bitbuffer_putbits(&bitbuffer, super.bits.inode.regular_file.size, node->regular_file->size);
+			rc = buffer_add(&entry_buffer, bitbuffer_buffer(&bitbuffer), size);
+			if (rc < 0) {
+				fprintf(stdout, "buffer add failed\n");
+				bitbuffer_uninit(&bitbuffer);
+				buffer_uninit(&entry_buffer);
+				return -1;
+			}
+			node->size = rc;
+			bitbuffer_uninit(&bitbuffer);
+			rc = buffer_add(&entry_buffer, node->regular_file->content, node->regular_file->size);
+			if (rc < 0) {
+				fprintf(stdout, "buffer add failed\n");
+				buffer_uninit(&entry_buffer);
+				return -1;
+			}
+			node->size += rc;
+			index = offset & ((1 << super.block_log2) - 1);
+			block = offset >> super.block_log2;
+			node->block = block;
+			node->index = index;
+			offset += node->size;
+		} else if (node->type == smashfs_inode_type_directory) {
+			size  = 0;
+			size += super.bits.inode.directory.parent;
+			size += super.bits.inode.directory.nentries;
+			size  = (size + 7) / 8;
+			rc = bitbuffer_init(&bitbuffer, size);
+			if (rc != 0) {
+				fprintf(stderr, "bitbuffer init failed\n");
+				buffer_uninit(&entry_buffer);
+				return -1;
+			}
+			bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.parent  , node->directory->parent);
+			bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.nentries, node->directory->nentries);
+			rc = buffer_add(&entry_buffer, bitbuffer_buffer(&bitbuffer), size);
+			if (rc < 0) {
+				fprintf(stdout, "buffer add failed\n");
+				bitbuffer_uninit(&bitbuffer);
+				buffer_uninit(&entry_buffer);
+				return -1;
+			}
+			node->size = rc;
+			bitbuffer_uninit(&bitbuffer);
+			size  = 0;
+			size += super.bits.inode.directory.entry.number;
+			size  = (size + 7) / 8;
+			s = sizeof(struct node_directory);
+			for (e = 0; e < node->directory->nentries; e++) {
+				rc = bitbuffer_init(&bitbuffer, size);
+				if (rc != 0) {
+					fprintf(stderr, "bitbuffer init failed\n");
+					buffer_uninit(&entry_buffer);
+					return -1;
+				}
+				bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.entry.number, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->number);
+				rc = buffer_add(&entry_buffer, bitbuffer_buffer(&bitbuffer), size);
+				if (rc < 0) {
+					fprintf(stdout, "buffer add failed\n");
+					bitbuffer_uninit(&bitbuffer);
+					buffer_uninit(&entry_buffer);
+					return -1;
+				}
+				node->size += rc;
+				rc = buffer_add(&entry_buffer, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name, strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name) + 1);
+				if (rc < 0) {
+					fprintf(stdout, "buffer add failed\n");
+					bitbuffer_uninit(&bitbuffer);
+					buffer_uninit(&entry_buffer);
+					return -1;
+				}
+				node->size += rc;
+				bitbuffer_uninit(&bitbuffer);
+				s += sizeof(struct node_directory_entry) + strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name) + 1;
+			}
+			index = offset & ((1 << super.block_log2) - 1);
+			block = offset >> super.block_log2;
+			node->block = block;
+			node->index = index;
+			offset += node->size;
+		} else if (node->type == smashfs_inode_type_symbolic_link) {
+			rc = buffer_add(&entry_buffer, node->symbolic_link->path, strlen(node->symbolic_link->path) + 1);
+			if (rc < 0) {
+				fprintf(stdout, "buffer add failed\n");
+				buffer_uninit(&entry_buffer);
+				return -1;
+			}
+			node->size = rc;
+			index = offset & ((1 << super.block_log2) - 1);
+			block = offset >> super.block_log2;
+			node->block = block;
+			node->index = index;
+			offset += node->size;
+		} else {
+			fprintf(stderr, "unknown type: %lld\n", node->type);
+		}
 	}
+
+	fprintf(stdout, "  calculating inode size\n");
 
 	max_inode_size  = 0;
 	max_inode_size += super.bits.inode.number;
@@ -327,14 +440,15 @@ static int output_write (void)
 	HASH_SRT(hh, nodes_table, nodes_sort_by_number);
 
 	fprintf(stdout, "  filling inodes table\n");
-	buffer = malloc(size);
-	if (buffer == NULL) {
-		fprintf(stderr, "malloc failed\n");
-		close(fd);
+
+	buffer_init(&inode_buffer);
+	rc = bitbuffer_init(&bitbuffer, size);
+	if (rc != 0) {
+		fprintf(stderr, "bitbuffer init failed\n");
+		buffer_uninit(&inode_buffer);
+		buffer_uninit(&entry_buffer);
 		return -1;
 	}
-	memset(buffer, 0, size);
-	bitbuffer_init(&bitbuffer, buffer, size);
 	HASH_ITER(hh, nodes_table, node, nnode) {
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.number    , node->number);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.type      , node->type);
@@ -346,119 +460,34 @@ static int output_write (void)
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.ctime     , node->ctime - super.min.inode.ctime);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.mtime     , node->mtime - super.min.inode.mtime);
 	}
-	bitbuffer_uninit(&bitbuffer);
-	fprintf(stdout, "  writing inodes tables (%zd bytes)\n", size);
-	rc = write(fd, buffer, size);
-	if (rc != size) {
-		fprintf(stdout, "write failed\n");
-		free(buffer);
-		close(fd);
+	rc = buffer_add(&inode_buffer, bitbuffer_buffer(&bitbuffer), size);
+	if (rc < 0) {
+		fprintf(stdout, "buffer add failed\n");
+		bitbuffer_uninit(&bitbuffer);
+		buffer_uninit(&inode_buffer);
+		buffer_uninit(&entry_buffer);
 		return -1;
 	}
-	free(buffer);
+	bitbuffer_uninit(&bitbuffer);
 
-	fprintf(stdout, "  sorting inodes table by type\n");
-	HASH_SRT(hh, nodes_table, nodes_sort_by_type);
+	fprintf(stdout, "  filling super block\n");
 
-	HASH_ITER(hh, nodes_table, node, nnode) {
-		if (node->type == smashfs_inode_type_regular_file) {
-			size  = 0;
-			size += super.bits.inode.regular_file.size;
-			size = (size + 7) / 8;
-			buffer = malloc(size);
-			if (buffer == NULL) {
-				fprintf(stderr, "malloc failed\n");
-				close(fd);
-				return -1;
-			}
-			memset(buffer, 0, size);
-			bitbuffer_init(&bitbuffer, buffer, size);
-			bitbuffer_putbits(&bitbuffer, super.bits.inode.regular_file.size, node->regular_file->size);
-			bitbuffer_uninit(&bitbuffer);
-			rc = write(fd, buffer, size);
-			if (rc != size) {
-				fprintf(stdout, "write failed\n");
-				free(buffer);
-				close(fd);
-				return -1;
-			}
-			free(buffer);
-			rc = write(fd, node->regular_file->content, node->regular_file->size);
-			if (rc != node->regular_file->size) {
-				fprintf(stdout, "write failed\n");
-				close(fd);
-				return -1;
-			}
-		} else if (node->type == smashfs_inode_type_directory) {
-			size  = 0;
-			size += super.bits.inode.directory.parent;
-			size += super.bits.inode.directory.nentries;
-			size = (size + 7) / 8;
-			buffer = malloc(size);
-			if (buffer == NULL) {
-				fprintf(stderr, "malloc failed\n");
-				close(fd);
-				return -1;
-			}
-			memset(buffer, 0, size);
-			bitbuffer_init(&bitbuffer, buffer, size);
-			bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.parent  , node->directory->parent);
-			bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.nentries, node->directory->nentries);
-			bitbuffer_uninit(&bitbuffer);
-			rc = write(fd, buffer, size);
-			if (rc != size) {
-				fprintf(stdout, "write failed\n");
-				free(buffer);
-				close(fd);
-				return -1;
-			}
-			free(buffer);
-			size  = 0;
-			size += super.bits.inode.directory.entry.number;
-			size = (size + 7) / 8;
-			buffer = malloc(size);
-			if (buffer == NULL) {
-				fprintf(stderr, "malloc failed\n");
-				close(fd);
-				return -1;
-			}
-			s = sizeof(struct node_directory);
-			for (e = 0; e < node->directory->nentries; e++) {
-				memset(buffer, 0, size);
-				bitbuffer_init(&bitbuffer, buffer, size);
-				bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.entry.number, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->number);
-				bitbuffer_uninit(&bitbuffer);
-				rc = write(fd, buffer, size);
-				if (rc != size) {
-					fprintf(stdout, "write failed\n");
-					free(buffer);
-					close(fd);
-					return -1;
-				}
-				rc = write(fd, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name, strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name) + 1);
-				if (rc != (ssize_t) strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name) + 1) {
-					fprintf(stdout, "write failed\n");
-					free(buffer);
-					close(fd);
-					return -1;
-				}
-				s += sizeof(struct node_directory_entry) + strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name) + 1;
-			}
-			free(buffer);
-		} else if (node->type == smashfs_inode_type_symbolic_link) {
-			rc = write(fd, node->symbolic_link->path, strlen(node->symbolic_link->path) + 1);
-			if (rc != (ssize_t) strlen(node->symbolic_link->path) + 1) {
-				fprintf(stdout, "write failed\n");
-				free(buffer);
-				close(fd);
-				return -1;
-			}
-		} else {
-			fprintf(stderr, "unknown type: %lld\n", node->type);
-		}
+	buffer_init(&super_buffer);
+	rc = buffer_add(&super_buffer, &super, sizeof(struct smashfs_super_block));
+	if (rc < 0) {
+		fprintf(stderr, "buffer add failed for super block\n");
+		buffer_uninit(&super_buffer);
+		buffer_uninit(&inode_buffer);
+		buffer_uninit(&entry_buffer);
+		return -1;
 	}
 
-	close(fd);
+	fprintf(stdout, "super: %lld bytes\n", buffer_length(&super_buffer));
+	fprintf(stdout, "inode: %lld bytes\n", buffer_length(&inode_buffer));
+	fprintf(stdout, "entry: %lld bytes\n", buffer_length(&entry_buffer));
+	buffer_uninit(&super_buffer);
+	buffer_uninit(&inode_buffer);
+	buffer_uninit(&entry_buffer);
 	return 0;
 }
 
@@ -805,7 +834,7 @@ int main (int argc, char *argv[])
 	};
 	rc = 0;
 	option_index = 0;
-	while ((c = getopt_long(argc, argv, "hds:o:", long_options, &option_index)) != -1) {
+	while ((c = getopt_long(argc, argv, "hds:o:b:", long_options, &option_index)) != -1) {
 		switch (c) {
 			case 's':
 				source = malloc(sizeof(struct source));
