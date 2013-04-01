@@ -70,6 +70,16 @@ struct smashfs_super_block {
 			uint32_t gid;
 			uint32_t ctime;
 			uint32_t mtime;
+			struct {
+				uint32_t size;
+			} regular_file;
+			struct {
+				uint32_t parent;
+				uint32_t nentries;
+				struct {
+					uint32_t number;
+				} entry;
+			} directory;
 		} inode;
 	} bits;
 	struct {

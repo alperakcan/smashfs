@@ -60,18 +60,18 @@ struct source {
 };
 
 struct node_regular_file {
-	unsigned long long size;
+	long long size;
 	char content[0];
 };
 
 struct node_directory_entry {
-	unsigned long long number;
+	long long number;
 	char name[0];
 };
 
 struct node_directory {
-	unsigned long long parent;
-	unsigned long long nentries;
+	long long parent;
+	long long nentries;
 	struct node_directory_entry entries[0];
 };
 
@@ -100,6 +100,10 @@ struct node {
 
 static LIST_HEAD(sources, source) sources;
 
+static unsigned long long nduplicates		= 0;
+static unsigned long long nregular_files                = 0;
+static unsigned long long ndirectories          = 0;
+static unsigned long long nsymbolic_links       = 0;
 static unsigned long long nodes_id		= 0;
 static struct node *nodes_table			= NULL;
 
@@ -132,11 +136,30 @@ static unsigned long long blog (long long number)
 	return i;
 }
 
+static int nodes_sort_by_number (struct node *a, struct node *b)
+{
+	if (a->number == b->number) {
+		return 0;
+	}
+	return (a->number < b->number) ? -1 : 1;
+}
+
+static int nodes_sort_by_type (struct node *a, struct node *b)
+{
+	if (a->type == b->type) {
+		return 0;
+	}
+	return (a->type < b->type) ? -1 : 1;
+}
+
 static int output_write (void)
 {
 	int fd;
 	ssize_t rc;
 	ssize_t size;
+
+	long long e;
+	long long s;
 
 	struct node *node;
 	struct node *nnode;
@@ -144,6 +167,10 @@ static int output_write (void)
 	struct smashfs_super_block super;
 
 	unsigned char *buffer;
+
+	long long min_inode_ctime;
+	long long min_inode_mtime;
+
 	long long max_inode_size;
 	long long max_inode_number;
 	long long max_inode_type;
@@ -154,8 +181,12 @@ static int output_write (void)
 	long long max_inode_gid;
 	long long max_inode_ctime;
 	long long max_inode_mtime;
-	long long min_inode_ctime;
-	long long min_inode_mtime;
+
+	long long max_inode_regular_file_size;
+
+	long long max_inode_directory_parent;
+	long long max_inode_directory_nentries;
+	long long max_inode_directory_entry_number;
 
 	struct bitbuffer bitbuffer;
 
@@ -166,6 +197,9 @@ static int output_write (void)
 		return -1;
 	}
 
+	min_inode_ctime      = LONG_LONG_MAX;
+	min_inode_mtime      = LONG_LONG_MAX;
+
 	max_inode_number     = -1;
 	max_inode_type       = -1;
 	max_inode_owner_mode = -1;
@@ -175,8 +209,13 @@ static int output_write (void)
 	max_inode_gid        = -1;
 	max_inode_ctime      = -1;
 	max_inode_mtime      = -1;
-	min_inode_ctime      = LONG_LONG_MAX;
-	min_inode_mtime      = LONG_LONG_MAX;
+
+	max_inode_regular_file_size = -1;
+
+	max_inode_directory_parent       = -1;
+	max_inode_directory_nentries     = -1;
+	max_inode_directory_entry_number = -1;
+
 	HASH_ITER(hh, nodes_table, node, nnode) {
 		max_inode_number     = MAX(max_inode_number, node->number);
 		max_inode_type       = MAX(max_inode_type, node->type);
@@ -189,50 +228,81 @@ static int output_write (void)
 		max_inode_mtime      = MAX(max_inode_mtime, node->mtime);
 		min_inode_ctime      = MIN(max_inode_ctime, min_inode_ctime);
 		min_inode_mtime      = MIN(max_inode_mtime, min_inode_mtime);
+		if (node->type == smashfs_inode_type_regular_file) {
+			max_inode_regular_file_size = MAX(max_inode_regular_file_size, node->regular_file->size);
+		} else if (node->type == smashfs_inode_type_directory) {
+			max_inode_directory_parent   = MAX(max_inode_directory_parent  , node->directory->parent);
+			max_inode_directory_nentries = MAX(max_inode_directory_nentries, node->directory->nentries);
+			size = sizeof(struct node_directory);
+			for (e = 0; e < node->directory->nentries; e++) {
+				max_inode_directory_entry_number = MAX(max_inode_directory_entry_number, ((struct node_directory_entry *) (((unsigned char *) node->directory) + size))->number);
+				size += sizeof(struct node_directory_entry) + strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + size))->name) + 1;
+			}
+		}
+	}
+
+	fprintf(stdout, "  filling super block\n");
+
+	super.magic      = SMASHFS_MAGIC;
+	super.version    = SMASHFS_VERSION_0;
+	super.ctime      = 0;
+	super.block_size = block_size;
+	super.block_log2 = slog(block_size);
+	super.inodes     = HASH_CNT(hh, nodes_table);
+	super.root       = 0;
+
+	super.min.inode.ctime = min_inode_ctime;
+	super.min.inode.mtime = min_inode_mtime;
+
+	super.bits.inode.number     = blog(max_inode_number);
+	super.bits.inode.type       = blog(max_inode_type);
+	super.bits.inode.owner_mode = blog(max_inode_owner_mode);
+	super.bits.inode.group_mode = blog(max_inode_group_mode);
+	super.bits.inode.other_mode = blog(max_inode_other_mode);
+	super.bits.inode.uid        = blog(max_inode_uid);
+	super.bits.inode.gid        = blog(max_inode_gid);
+	super.bits.inode.ctime      = blog(max_inode_ctime - min_inode_ctime);
+	super.bits.inode.mtime      = blog(max_inode_mtime - min_inode_mtime);
+
+	super.bits.inode.regular_file.size = blog(max_inode_regular_file_size);
+
+	super.bits.inode.directory.parent       = blog(max_inode_directory_parent);
+	super.bits.inode.directory.nentries     = blog(max_inode_directory_nentries);
+	super.bits.inode.directory.entry.number = blog(max_inode_directory_entry_number);
+
+	if (debug) {
+		fprintf(stdout, "  super block:\n");
+		fprintf(stdout, "    magic     : 0x%08x, %u\n", super.magic, super.magic);
+		fprintf(stdout, "    version   : 0x%08x, %u\n", super.version, super.version);
+		fprintf(stdout, "    ctime     : 0x%08x, %u\n", super.ctime, super.ctime);
+		fprintf(stdout, "    block_size: 0x%08x, %u\n", super.block_size, super.block_size);
+		fprintf(stdout, "    block_log2: 0x%08x, %u\n", super.block_log2, super.block_log2);
+		fprintf(stdout, "    inodes    : 0x%08x, %u\n", super.inodes, super.inodes);
+		fprintf(stdout, "    root      : 0x%08x, %u\n", super.root, super.root);
+		fprintf(stdout, "    bits:\n");
+		fprintf(stdout, "      min:\n");
+		fprintf(stdout, "        ctime : 0x%08x, %u\n", super.min.inode.ctime, super.min.inode.ctime);
+		fprintf(stdout, "        mtime : 0x%08x, %u\n", super.min.inode.mtime, super.min.inode.mtime);
+		fprintf(stdout, "      inode:\n");
+		fprintf(stdout, "        number    : %u\n", super.bits.inode.number);
+		fprintf(stdout, "        type      : %u\n", super.bits.inode.type);
+		fprintf(stdout, "        owner_mode: %u\n", super.bits.inode.owner_mode);
+		fprintf(stdout, "        group_mode: %u\n", super.bits.inode.group_mode);
+		fprintf(stdout, "        other_mode: %u\n", super.bits.inode.other_mode);
+		fprintf(stdout, "        uid       : %u\n", super.bits.inode.uid);
+		fprintf(stdout, "        gid       : %u\n", super.bits.inode.gid);
+		fprintf(stdout, "        ctime     : %u\n", super.bits.inode.ctime);
+		fprintf(stdout, "        mtime     : %u\n", super.bits.inode.mtime);
+		fprintf(stdout, "        regular_file:\n");
+		fprintf(stdout, "          size : %u\n", super.bits.inode.regular_file.size);
+		fprintf(stdout, "        directory:\n");
+		fprintf(stdout, "          parent   : %u\n", super.bits.inode.directory.parent);
+		fprintf(stdout, "          nentries : %u\n", super.bits.inode.directory.nentries);
+		fprintf(stdout, "          entry:\n");
+		fprintf(stdout, "            number : %u\n", super.bits.inode.directory.entry.number);
 	}
 
 	fprintf(stdout, "  writing super block (%zd bytes)\n", sizeof(struct smashfs_super_block));
-	super.magic                 = SMASHFS_MAGIC;
-	super.version               = SMASHFS_VERSION_0;
-	super.ctime                 = 0;
-	super.block_size            = block_size;
-	super.block_log2            = slog(block_size);
-	super.inodes                = HASH_CNT(hh, nodes_table);
-	super.root                  = 0;
-	max_inode_size       = 0;
-	super.min.inode.ctime       = min_inode_ctime;
-	super.min.inode.mtime       = min_inode_mtime;
-	super.bits.inode.number     = blog(max_inode_number);                  max_inode_size += super.bits.inode.number;
-	super.bits.inode.type       = blog(max_inode_type);                    max_inode_size += super.bits.inode.type;
-	super.bits.inode.owner_mode = blog(max_inode_owner_mode);              max_inode_size += super.bits.inode.owner_mode;
-	super.bits.inode.group_mode = blog(max_inode_group_mode);              max_inode_size += super.bits.inode.group_mode;
-	super.bits.inode.other_mode = blog(max_inode_other_mode);              max_inode_size += super.bits.inode.other_mode;
-	super.bits.inode.uid        = blog(max_inode_uid);                     max_inode_size += super.bits.inode.uid;
-	super.bits.inode.gid        = blog(max_inode_gid);                     max_inode_size += super.bits.inode.gid;
-	super.bits.inode.ctime      = blog(max_inode_ctime - min_inode_ctime); max_inode_size += super.bits.inode.ctime;
-	super.bits.inode.mtime      = blog(max_inode_mtime - min_inode_mtime); max_inode_size += super.bits.inode.mtime;
-
-	fprintf(stdout, "  super block:\n");
-	fprintf(stdout, "    magic     : 0x%08x, %u\n", super.magic, super.magic);
-	fprintf(stdout, "    version   : 0x%08x, %u\n", super.version, super.version);
-	fprintf(stdout, "    ctime     : 0x%08x, %u\n", super.ctime, super.ctime);
-	fprintf(stdout, "    block_size: 0x%08x, %u\n", super.block_size, super.block_size);
-	fprintf(stdout, "    block_log2: 0x%08x, %u\n", super.block_log2, super.block_log2);
-	fprintf(stdout, "    inodes    : 0x%08x, %u\n", super.inodes, super.inodes);
-	fprintf(stdout, "    root      : 0x%08x, %u\n", super.root, super.root);
-	fprintf(stdout, "    min_ctime : 0x%08x, %u\n", super.min.inode.ctime, super.min.inode.ctime);
-	fprintf(stdout, "    min_mtime : 0x%08x, %u\n", super.min.inode.mtime, super.min.inode.mtime);
-	fprintf(stdout, "    bits:\n");
-	fprintf(stdout, "      inode:\n");
-	fprintf(stdout, "        number    : %u\n", super.bits.inode.number);
-	fprintf(stdout, "        type      : %u\n", super.bits.inode.type);
-	fprintf(stdout, "        owner_mode: %u\n", super.bits.inode.owner_mode);
-	fprintf(stdout, "        group_mode: %u\n", super.bits.inode.group_mode);
-	fprintf(stdout, "        other_mode: %u\n", super.bits.inode.other_mode);
-	fprintf(stdout, "        uid       : %u\n", super.bits.inode.uid);
-	fprintf(stdout, "        gid       : %u\n", super.bits.inode.gid);
-	fprintf(stdout, "        ctime     : %u\n", super.bits.inode.ctime);
-	fprintf(stdout, "        mtime     : %u\n", super.bits.inode.mtime);
 
 	rc = write(fd, &super, sizeof(struct smashfs_super_block));
 	if (rc != sizeof(struct smashfs_super_block)) {
@@ -252,6 +322,9 @@ static int output_write (void)
 	max_inode_size += super.bits.inode.ctime;
 	max_inode_size += super.bits.inode.mtime;
 	size = (super.inodes * max_inode_size + 7) / 8;
+
+	fprintf(stdout, "  sorting inodes table by number\n");
+	HASH_SRT(hh, nodes_table, nodes_sort_by_number);
 
 	fprintf(stdout, "  filling inodes table\n");
 	buffer = malloc(size);
@@ -282,8 +355,99 @@ static int output_write (void)
 		close(fd);
 		return -1;
 	}
-
 	free(buffer);
+
+	fprintf(stdout, "  sorting inodes table by type\n");
+	HASH_SRT(hh, nodes_table, nodes_sort_by_type);
+
+	HASH_ITER(hh, nodes_table, node, nnode) {
+		if (node->type == smashfs_inode_type_regular_file) {
+			size  = 0;
+			size += super.bits.inode.regular_file.size;
+			size = (size + 7) / 8;
+			buffer = malloc(size);
+			if (buffer == NULL) {
+				fprintf(stderr, "malloc failed\n");
+				close(fd);
+				return -1;
+			}
+			memset(buffer, 0, size);
+			bitbuffer_init(&bitbuffer, buffer, size);
+			bitbuffer_putbits(&bitbuffer, super.bits.inode.regular_file.size, node->regular_file->size);
+			bitbuffer_uninit(&bitbuffer);
+			rc = write(fd, buffer, size);
+			if (rc != size) {
+				fprintf(stdout, "write failed\n");
+				free(buffer);
+				close(fd);
+				return -1;
+			}
+			free(buffer);
+			rc = write(fd, node->regular_file->content, node->regular_file->size);
+			if (rc != node->regular_file->size) {
+				fprintf(stdout, "write failed\n");
+				close(fd);
+				return -1;
+			}
+		} else if (node->type == smashfs_inode_type_directory) {
+			size  = 0;
+			size += super.bits.inode.directory.parent;
+			size += super.bits.inode.directory.nentries;
+			size = (size + 7) / 8;
+			buffer = malloc(size);
+			if (buffer == NULL) {
+				fprintf(stderr, "malloc failed\n");
+				close(fd);
+				return -1;
+			}
+			memset(buffer, 0, size);
+			bitbuffer_init(&bitbuffer, buffer, size);
+			bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.parent  , node->directory->parent);
+			bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.nentries, node->directory->nentries);
+			bitbuffer_uninit(&bitbuffer);
+			rc = write(fd, buffer, size);
+			if (rc != size) {
+				fprintf(stdout, "write failed\n");
+				free(buffer);
+				close(fd);
+				return -1;
+			}
+			free(buffer);
+			size  = 0;
+			size += super.bits.inode.directory.entry.number;
+			size = (size + 7) / 8;
+			buffer = malloc(size);
+			if (buffer == NULL) {
+				fprintf(stderr, "malloc failed\n");
+				close(fd);
+				return -1;
+			}
+			s = sizeof(struct node_directory);
+			for (e = 0; e < node->directory->nentries; e++) {
+				memset(buffer, 0, size);
+				bitbuffer_init(&bitbuffer, buffer, size);
+				bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.entry.number, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->number);
+				bitbuffer_uninit(&bitbuffer);
+				rc = write(fd, buffer, size);
+				if (rc != size) {
+					fprintf(stdout, "write failed\n");
+					free(buffer);
+					close(fd);
+					return -1;
+				}
+				rc = write(fd, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name, strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name) + 1);
+				if (rc != (ssize_t) strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name) + 1) {
+					fprintf(stdout, "write failed\n");
+					free(buffer);
+					close(fd);
+					return -1;
+				}
+				s += sizeof(struct node_directory_entry) + strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name) + 1;
+			}
+			free(buffer);
+		}
+	}
+
 	close(fd);
 	return 0;
 }
@@ -300,14 +464,18 @@ static struct node * node_new (FTSENT *entry)
 {
 	int fd;
 	ssize_t r;
+	long long e;
+	long long s;
+	int duplicate;
 	struct node *node;
 	struct stat *stbuf;
+	struct node *dnode;
+	struct node *ndnode;
 	struct node *parent;
-	unsigned long long e;
-	unsigned long long s;
 	struct node_directory *directory;
 	struct node_directory_entry *directory_entry;
 	fd = -1;
+	duplicate = 0;
 	stbuf = entry->fts_statp;
 	node = malloc(sizeof(struct node));
 	if (node == NULL) {
@@ -376,7 +544,7 @@ static struct node * node_new (FTSENT *entry)
 			fprintf(stderr, "open failed\n");
 			goto bail;
 		}
-#if 0
+#if 1
 		node->regular_file = malloc(sizeof(struct node_regular_file) + stbuf->st_size);
 		if (node->regular_file == NULL) {
 			fprintf(stderr, "malloc failed\n");
@@ -388,6 +556,24 @@ static struct node * node_new (FTSENT *entry)
 			fprintf(stderr, "read failed\n");
 			goto bail;
 		}
+#if 1
+		HASH_ITER(hh, nodes_table, dnode, ndnode) {
+			if (dnode->type != smashfs_inode_type_regular_file) {
+				continue;
+			}
+			if (dnode->regular_file->size != node->regular_file->size) {
+				continue;
+			}
+			if (memcmp(dnode->regular_file->content, node->regular_file->content, node->regular_file->size) != 0) {
+				continue;
+			}
+			free(node->pointer);
+			free(node);
+			node = dnode;
+			duplicate = 1;
+			break;
+		}
+#endif
 #else
 		node->regular_file = malloc(sizeof(struct node_regular_file) + strlen(entry->fts_accpath) + 1);
 		if (node->regular_file == NULL) {
@@ -398,6 +584,7 @@ static struct node * node_new (FTSENT *entry)
 		memcpy(node->regular_file->content, entry->fts_accpath, strlen(entry->fts_accpath) + 1);
 #endif
 		close(fd);
+		fd = -1;
 	} else if (node->type == smashfs_inode_type_directory) {
 		node->directory = malloc(sizeof(struct node_directory));
 		if (node->directory == NULL) {
@@ -458,13 +645,28 @@ static struct node * node_new (FTSENT *entry)
 	free(parent->directory);
 	parent->directory = directory;
 out:
-	HASH_ADD(hh, nodes_table, number, sizeof(node->number), node);
-	nodes_id += 1;
+	if (duplicate == 0) {
+		HASH_ADD(hh, nodes_table, number, sizeof(node->number), node);
+		nodes_id += 1;
+	} else {
+		nduplicates += 1;
+	}
+	if (node->type == smashfs_inode_type_regular_file) {
+		nregular_files += 1;
+	}
+	if (node->type == smashfs_inode_type_directory) {
+		ndirectories += 1;
+	}
+	if (node->type == smashfs_inode_type_symbolic_link) {
+		nsymbolic_links += 1;
+	}
 	return node;
 bail:
 	close(fd);
-	free(node->pointer);
-	free(node);
+	if (duplicate == 0) {
+		free(node->pointer);
+		free(node);
+	}
 	return NULL;
 }
 
@@ -645,6 +847,10 @@ int main (int argc, char *argv[])
 	}
 	sources_scan();
 	output_write();
+	fprintf(stdout, "duplicates    : %lld\n", nduplicates);
+	fprintf(stdout, "regular_files : %lld\n", nregular_files);
+	fprintf(stdout, "directories   : %lld\n", ndirectories);
+	fprintf(stdout, "symbolic_links: %lld\n", nsymbolic_links);
 bail:
 	while (sources.lh_first != NULL) {
 		source = sources.lh_first;;
