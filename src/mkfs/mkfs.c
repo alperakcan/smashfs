@@ -113,7 +113,7 @@ static struct node *nodes_table			= NULL;
 
 static int debug				= 0;
 static char *output				= NULL;
-static unsigned int block_size			= 128 * 1024;
+static unsigned int block_size			= 1024 * 1024;
 
 static int no_group_mode			= 0;
 static int no_other_mode			= 0;
