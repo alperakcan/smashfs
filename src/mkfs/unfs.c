@@ -54,9 +54,89 @@ struct smashfs_super_block super_block;
 
 long long max_inode_size;
 
-static void traverse (long long inode)
+static void traverse (long long inode, const char *name, long long level)
 {
+	long long e;
+	long long l;
+	long long s;
+	long long number;
+	long long type;
+	long long owner_mode;
+	long long group_mode;
+	long long other_mode;
+	long long uid;
+	long long gid;
+	long long ctime;
+	long long mtime;
+	long long size;
+	long long block;
+	long long index;
+	long long directory_parent;
+	long long directory_nentries;
+	long long directory_entry_number;
+	unsigned char *buffer;
+	struct bitbuffer bitbuffer;
 	bitbuffer_setpos(&inode_bitbuffer, inode * max_inode_size);
+	number     = inode;
+	type       = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.type);
+	owner_mode = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.owner_mode);
+	group_mode = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.group_mode);
+	other_mode = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.other_mode);
+	uid        = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.uid);
+	gid        = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.gid);
+	ctime      = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.ctime);
+	mtime      = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.mtime);
+	size       = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.size);
+	block      = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.block);
+	index      = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.index);
+	if (debug > 1) {
+		fprintf(stdout, "  ");
+		for (l = 0; l < level; l++) {
+			fprintf(stdout, "  ");
+		}
+		fprintf(stdout, "%s %s [number: %lld",
+				(type == smashfs_inode_type_directory) ? "(d)" :
+				(type == smashfs_inode_type_regular_file) ? "(f)" :
+				(type == smashfs_inode_type_symbolic_link) ? "(l)" :
+				"?",
+				name,
+				number);
+	}
+	buffer  = buffer_buffer(&entry_buffer);
+	buffer += block * super_block.block_size;
+	buffer += index;
+	if (type == smashfs_inode_type_directory) {
+		bitbuffer_init_from_buffer(&bitbuffer, buffer, size);
+		directory_parent   = bitbuffer_getbits(&bitbuffer, super_block.bits.inode.directory.parent);
+		directory_nentries = bitbuffer_getbits(&bitbuffer, super_block.bits.inode.directory.nentries);
+		bitbuffer_uninit(&bitbuffer);
+		if (debug > 1) {
+			fprintf(stdout, ", parent: %lld, nentries: %lld]\n", directory_parent, directory_nentries);
+		}
+		s  = super_block.bits.inode.directory.parent;
+		s += super_block.bits.inode.directory.nentries;
+		s  = (s + 7) / 8;
+		buffer += s;
+		for (e = 0; e < directory_nentries; e++) {
+			s  = 0;
+			s += super_block.bits.inode.directory.entries.number;
+			s  = (s + 7) / 8;
+			bitbuffer_init_from_buffer(&bitbuffer, buffer, s);
+			directory_entry_number = bitbuffer_getbits(&bitbuffer, super_block.bits.inode.directory.entries.number);
+			bitbuffer_uninit(&bitbuffer);
+			buffer += s;
+			traverse(directory_entry_number, (char *) buffer, level + 1);
+			buffer += strlen((char *) buffer) + 1;
+		}
+	} else if (type == smashfs_inode_type_regular_file) {
+		if (debug > 1) {
+			fprintf(stdout, "]\n");
+		}
+	} else if (type == smashfs_inode_type_symbolic_link) {
+		if (debug > 1) {
+			fprintf(stdout, ", path: %s]\n", buffer);
+		}
+	}
 }
 
 static void help_print (const char *pname)
@@ -204,6 +284,28 @@ int main (int argc, char *argv[])
 		}
 		r += rc;
 	}
+	rc = lseek(fd, super_block.entries_offset, SEEK_SET);
+	if (rc != (int) super_block.entries_offset) {
+		fprintf(stderr, "seek failed for entries\n");
+		rc = -1;
+		goto bail;
+	}
+	r = 0;
+	while (r < super_block.entries_size) {
+		rc = read(fd, buffer, bsize);
+		if (rc <= 0) {
+			fprintf(stderr, "read failed\n");
+			rc = -1;
+			goto bail;
+		}
+		rb = buffer_add(&entry_buffer, buffer, rc);
+		if (rb != rc) {
+			fprintf(stderr, "buffer add failed\n");
+			rc = -1;
+			goto bail;
+		}
+		r += rc;
+	}
 	rc = bitbuffer_init_from_buffer(&inode_bitbuffer, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
 	if (rc != 0) {
 		fprintf(stderr, "bitbuffer init from buffer failed\n");
@@ -222,7 +324,7 @@ int main (int argc, char *argv[])
 	max_inode_size += super_block.bits.inode.size;
 	max_inode_size += super_block.bits.inode.block;
 	max_inode_size += super_block.bits.inode.index;
-	if (debug > 1) {
+	if (debug > 2) {
 		fprintf(stdout, "  inodes:\n");
 		#define print_inode_bitvalue(a) { \
 			long long bitvalue; \
@@ -252,7 +354,7 @@ int main (int argc, char *argv[])
 		rc = -1;
 		goto bail;
 	}
-	traverse(super_block.root);
+	traverse(super_block.root, "/", 0);
 	rc = 0;
 bail:
 	bitbuffer_uninit(&inode_bitbuffer);

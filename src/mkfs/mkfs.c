@@ -431,6 +431,9 @@ static int output_write (void)
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.size      , node->size);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.block     , node->block);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.index     , node->index);
+		if (debug > 2) {
+			fprintf(stdout, "    node: %lld, size: %lld, block: %lld, index: %lld\n", node->number, node->size, node->block, node->index);
+		}
 	}
 	rc = buffer_add(&inode_buffer, bitbuffer_buffer(&bitbuffer), size);
 	if (rc < 0) {
@@ -682,7 +685,7 @@ static struct node * node_new (FTSENT *entry)
 			fprintf(stderr, "malloc failed\n");
 			goto bail;
 		}
-		node->directory->parent = -1;
+		node->directory->parent = 0;
 		node->directory->nentries = 0;
 		parent = entry->fts_parent->fts_pointer;
 		if (parent == NULL) {
@@ -848,7 +851,7 @@ static void sources_scan (void)
 			fprintf(stderr, "node new failed\n");
 			continue;
 		}
-		if (debug) {
+		if (debug > 1) {
 			int l;
 			struct node *parent;
 			parent = entry->fts_parent->fts_pointer;
