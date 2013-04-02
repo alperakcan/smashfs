@@ -80,6 +80,7 @@ static void traverse (long long inode, const char *name, long long level)
 	long long directory_entry_number;
 	unsigned char *buffer;
 	struct bitbuffer bitbuffer;
+	(void) mtime;
 	bitbuffer_setpos(&inode_bitbuffer, inode * max_inode_size);
 	number     = inode;
 	type       = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.type);
@@ -194,7 +195,10 @@ static void traverse (long long inode, const char *name, long long level)
 			return;
 		}
 		chmod((char *) name, mode);
-		chown((char *) name, uid, gid);
+		rc = chown((char *) name, uid, gid);
+		if (rc != 0) {
+			fprintf(stderr, "chown failed\n");
+		}
 	} else if (type == smashfs_inode_type_regular_file) {
 		if (debug > 1) {
 			fprintf(stdout, "]\n");
@@ -214,7 +218,10 @@ static void traverse (long long inode, const char *name, long long level)
 		}
 		close(fd);
 		chmod((char *) name, mode);
-		chown((char *) name, uid, gid);
+		rc = chown((char *) name, uid, gid);
+		if (rc != 0) {
+			fprintf(stderr, "chown failed\n");
+		}
 	} else if (type == smashfs_inode_type_symbolic_link) {
 		if (debug > 1) {
 			fprintf(stdout, ", path: %s]\n", buffer);
@@ -226,7 +233,10 @@ static void traverse (long long inode, const char *name, long long level)
 			return;
 		}
 		chmod((char *) name, mode);
-		chown((char *) name, uid, gid);
+		rc = lchown((char *) name, uid, gid);
+		if (rc != 0) {
+			fprintf(stderr, "lchown failed\n");
+		}
 	}
 }
 
