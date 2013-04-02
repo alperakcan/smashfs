@@ -54,6 +54,71 @@ struct buffer entry_buffer		= BUFFER_INITIALIZER;
 struct smashfs_super_block super;
 
 long long max_inode_size;
+long long max_block_size;
+
+struct node {
+	long long number;
+	long long type;
+	long long owner_mode;
+	long long group_mode;
+	long long other_mode;
+	long long uid;
+	long long gid;
+	long long ctime;
+	long long mtime;
+	long long size;
+	long long block;
+	long long index;
+};
+
+struct block {
+	long long offset;
+	long long size;
+	long long compressed_size;
+};
+
+static int node_read (long long number, struct node *node)
+{
+	int rc;
+	struct bitbuffer bitbuffer;
+	rc = bitbuffer_init_from_buffer(&bitbuffer, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
+	if (rc != 0) {
+		fprintf(stderr, "bitbuffer init from buffer failed\n");
+		return -1;
+	}
+	bitbuffer_setpos(&bitbuffer, number * max_inode_size);
+	node->number     = number;
+	node->type       = bitbuffer_getbits(&bitbuffer, super.bits.inode.type);
+	node->owner_mode = bitbuffer_getbits(&bitbuffer, super.bits.inode.owner_mode);
+	node->group_mode = bitbuffer_getbits(&bitbuffer, super.bits.inode.group_mode);
+	node->other_mode = bitbuffer_getbits(&bitbuffer, super.bits.inode.other_mode);
+	node->uid        = bitbuffer_getbits(&bitbuffer, super.bits.inode.uid);
+	node->gid        = bitbuffer_getbits(&bitbuffer, super.bits.inode.gid);
+	node->ctime      = bitbuffer_getbits(&bitbuffer, super.bits.inode.ctime);
+	node->mtime      = bitbuffer_getbits(&bitbuffer, super.bits.inode.mtime);
+	node->size       = bitbuffer_getbits(&bitbuffer, super.bits.inode.size);
+	node->block      = bitbuffer_getbits(&bitbuffer, super.bits.inode.block);
+	node->index      = bitbuffer_getbits(&bitbuffer, super.bits.inode.index);
+	bitbuffer_uninit(&bitbuffer);
+	return 0;
+}
+
+static int block_read (long long number, struct block *block)
+{
+	int rc;
+	struct bitbuffer bitbuffer;
+	rc = bitbuffer_init_from_buffer(&bitbuffer, buffer_buffer(&block_buffer), buffer_length(&block_buffer));
+	if (rc != 0) {
+		fprintf(stderr, "bitbuffer init from buffer failed\n");
+		return -1;
+	}
+	bitbuffer_setpos(&bitbuffer, number * max_block_size);
+	block->offset  = bitbuffer_getbits(&bitbuffer, super.bits.block.offset);
+	block->size  = bitbuffer_getbits(&bitbuffer, super.bits.block.size);
+	block->compressed_size  = bitbuffer_getbits(&bitbuffer, super.bits.block.compressed_size);
+	bitbuffer_uninit(&bitbuffer);
+	return 0;
+}
 
 static void traverse (long long inode, const char *name, long long level)
 {
@@ -63,6 +128,8 @@ static void traverse (long long inode, const char *name, long long level)
 	long long e;
 	long long l;
 	long long s;
+	struct node node;
+	struct block block;
 	long long number;
 	long long type;
 	long long owner_mode;
@@ -81,25 +148,16 @@ static void traverse (long long inode, const char *name, long long level)
 	unsigned char *buffer;
 	struct bitbuffer bitbuffer;
 	(void) mtime;
-	rc = bitbuffer_init_from_buffer(&bitbuffer, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
+	rc = node_read(inode, &node);
 	if (rc != 0) {
-		fprintf(stderr, "bitbuffer init from buffer failed\n");
+		fprintf(stderr, "node read failed\n");
 		return;
 	}
-	bitbuffer_setpos(&bitbuffer, inode * max_inode_size);
-	number     = inode;
-	type       = bitbuffer_getbits(&bitbuffer, super.bits.inode.type);
-	owner_mode = bitbuffer_getbits(&bitbuffer, super.bits.inode.owner_mode);
-	group_mode = bitbuffer_getbits(&bitbuffer, super.bits.inode.group_mode);
-	other_mode = bitbuffer_getbits(&bitbuffer, super.bits.inode.other_mode);
-	uid        = bitbuffer_getbits(&bitbuffer, super.bits.inode.uid);
-	gid        = bitbuffer_getbits(&bitbuffer, super.bits.inode.gid);
-	ctime      = bitbuffer_getbits(&bitbuffer, super.bits.inode.ctime);
-	mtime      = bitbuffer_getbits(&bitbuffer, super.bits.inode.mtime);
-	size       = bitbuffer_getbits(&bitbuffer, super.bits.inode.size);
-	block      = bitbuffer_getbits(&bitbuffer, super.bits.inode.block);
-	index      = bitbuffer_getbits(&bitbuffer, super.bits.inode.index);
-	bitbuffer_uninit(&bitbuffer);
+	rc = block_read(node->block, &block);
+	if (rc != 0) {
+		fprintf(stderr, "block read failed\n");
+		return;
+	}
 	if (super.bits.inode.group_mode == 0) {
 		group_mode = owner_mode;
 	}
@@ -443,6 +501,10 @@ int main (int argc, char *argv[])
 	max_inode_size += super.bits.inode.size;
 	max_inode_size += super.bits.inode.block;
 	max_inode_size += super.bits.inode.index;
+	max_block_size  = 0;
+	max_block_size += super.bits.block.offset;
+	max_block_size += super.bits.block.size;
+	max_block_size += super.bits.block.compressed_size;
 	if (debug > 2) {
 		struct bitbuffer bitbuffer;
 		rc = bitbuffer_init_from_buffer(&bitbuffer, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
