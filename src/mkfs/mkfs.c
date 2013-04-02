@@ -115,6 +115,13 @@ static int debug				= 0;
 static char *output				= NULL;
 static unsigned int block_size			= 128 * 1024;
 
+static int no_group_mode			= 0;
+static int no_other_mode			= 0;
+static int no_uid				= 0;
+static int no_gid				= 0;
+static int no_ctime				= 0;
+static int no_mtime				= 0;
+
 static unsigned int slog (unsigned int block)
 {
 	unsigned int i;
@@ -247,6 +254,13 @@ static int output_write (void)
 			fprintf(stderr, "unknown type: %lld\n", node->type);
 		}
 	}
+
+	if (no_group_mode) { max_inode_group_mode = -1; }
+	if (no_other_mode) { max_inode_other_mode = -1; }
+	if (no_uid)        { max_inode_uid = -1; }
+	if (no_gid)        { max_inode_gid = -1; }
+	if (no_ctime)      { max_inode_ctime = -1; }
+	if (no_mtime)      { max_inode_mtime = -1; }
 
 	fprintf(stdout, "  setting super block (1/3)\n");
 
@@ -880,6 +894,12 @@ static void help_print (const char *pname)
 	fprintf(stdout, "  -o, --output     : output file\n");
 	fprintf(stdout, "  -b, --block_size : block size (default: %d)\n", block_size);
 	fprintf(stdout, "  -d, --debug      : enable debug output (default: %d)\n", debug);
+	fprintf(stdout, "  --no_group_mode  : disable group mode\n");
+	fprintf(stdout, "  --no_other_mode  : disable other mode\n");
+	fprintf(stdout, "  --no_uid         : disable uid\n");
+	fprintf(stdout, "  --no_gid         : disable gid\n");
+	fprintf(stdout, "  --no_ctime       : disable ctime\n");
+	fprintf(stdout, "  --no_mtime       : disable mtime\n");
 }
 
 int main (int argc, char *argv[])
@@ -892,16 +912,22 @@ int main (int argc, char *argv[])
 	struct source *source;
 	unsigned int nsources;
 	static struct option long_options[] = {
-		{"source"    , required_argument, 0, 's' },
-		{"output"    , required_argument, 0, 'o' },
-		{"block_size", required_argument, 0, 'b' },
-		{"debug"     , no_argument      , 0, 'd' },
-		{"help"      , no_argument      , 0, 'h' },
-		{ 0          , 0                , 0,  0 }
+		{"source"       , required_argument, 0, 's' },
+		{"output"       , required_argument, 0, 'o' },
+		{"block_size"   , required_argument, 0, 'b' },
+		{"debug"        , no_argument      , 0, 'd' },
+		{"no_group_mode", no_argument      , 0, 0x100 },
+		{"no_other_mode", no_argument      , 0, 0x101 },
+		{"no_uid"       , no_argument      , 0, 0x102 },
+		{"no_gid"       , no_argument      , 0, 0x103 },
+		{"no_ctime"     , no_argument      , 0, 0x104 },
+		{"no_mtime"     , no_argument      , 0, 0x105 },
+		{"help"         , no_argument      , 0, 'h' },
+		{ 0             , 0                , 0,  0 }
 	};
 	rc = 0;
 	option_index = 0;
-	while ((c = getopt_long(argc, argv, "hds:o:b:", long_options, &option_index)) != -1) {
+	while ((c = getopt_long(argc, argv, "hds:o:b:g:t:", long_options, &option_index)) != -1) {
 		switch (c) {
 			case 's':
 				source = malloc(sizeof(struct source));
@@ -932,6 +958,24 @@ int main (int argc, char *argv[])
 				break;
 			case 'd':
 				debug += 1;
+				break;
+			case 0x100:
+				no_group_mode = 1;
+				break;
+			case 0x101:
+				no_other_mode = 1;
+				break;
+			case 0x102:
+				no_uid = 1;
+				break;
+			case 0x103:
+				no_gid = 1;
+				break;
+			case 0x104:
+				no_ctime = 1;
+				break;
+			case 0x105:
+				no_mtime = 1;
 				break;
 			case 'h':
 				help_print(argv[0]);
