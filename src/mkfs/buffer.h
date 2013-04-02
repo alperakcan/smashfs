@@ -27,6 +27,12 @@
  * either expressed or implied, of the FreeBSD Project.
  */
 
+#define BUFFER_INITIALIZER { \
+	.buffer = NULL, \
+	.size = 0, \
+	.length = 0, \
+}
+
 struct buffer {
 	unsigned char *buffer;
 	long long size;
