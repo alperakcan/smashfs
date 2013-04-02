@@ -100,6 +100,24 @@ static int node_read (long long number, struct node *node)
 	node->block      = bitbuffer_getbits(&bitbuffer, super.bits.inode.block);
 	node->index      = bitbuffer_getbits(&bitbuffer, super.bits.inode.index);
 	bitbuffer_uninit(&bitbuffer);
+	if (super.bits.inode.group_mode == 0) {
+		node->group_mode = node->owner_mode;
+	}
+	if (super.bits.inode.other_mode == 0) {
+		node->other_mode = node->owner_mode;
+	}
+	if (super.bits.inode.uid == 0) {
+		node->uid = 0;
+	}
+	if (super.bits.inode.gid == 0) {
+		node->gid = 0;
+	}
+	if (super.bits.inode.ctime == 0) {
+		node->ctime = super.ctime;
+	}
+	if (super.bits.inode.mtime == 0) {
+		node->mtime = node->ctime;
+	}
 	return 0;
 }
 
@@ -130,51 +148,20 @@ static void traverse (long long inode, const char *name, long long level)
 	long long s;
 	struct node node;
 	struct block block;
-	long long number;
-	long long type;
-	long long owner_mode;
-	long long group_mode;
-	long long other_mode;
-	long long uid;
-	long long gid;
-	long long ctime;
-	long long mtime;
-	long long size;
-	long long block;
-	long long index;
 	long long directory_parent;
 	long long directory_nentries;
 	long long directory_entry_number;
 	unsigned char *buffer;
 	struct bitbuffer bitbuffer;
-	(void) mtime;
 	rc = node_read(inode, &node);
 	if (rc != 0) {
 		fprintf(stderr, "node read failed\n");
 		return;
 	}
-	rc = block_read(node->block, &block);
+	rc = block_read(node.block, &block);
 	if (rc != 0) {
 		fprintf(stderr, "block read failed\n");
 		return;
-	}
-	if (super.bits.inode.group_mode == 0) {
-		group_mode = owner_mode;
-	}
-	if (super.bits.inode.other_mode == 0) {
-		other_mode = owner_mode;
-	}
-	if (super.bits.inode.uid == 0) {
-		uid = 0;
-	}
-	if (super.bits.inode.gid == 0) {
-		gid = 0;
-	}
-	if (super.bits.inode.ctime == 0) {
-		ctime = super.ctime;
-	}
-	if (super.bits.inode.mtime == 0) {
-		mtime = ctime;
 	}
 	if (debug > 1) {
 		fprintf(stdout, "  ");
@@ -182,45 +169,45 @@ static void traverse (long long inode, const char *name, long long level)
 			fprintf(stdout, "  ");
 		}
 		fprintf(stdout, "%s %s [number: %lld",
-				(type == smashfs_inode_type_directory) ? "(d)" :
-				(type == smashfs_inode_type_regular_file) ? "(f)" :
-				(type == smashfs_inode_type_symbolic_link) ? "(l)" :
+				(node.type == smashfs_inode_type_directory) ? "(d)" :
+				(node.type == smashfs_inode_type_regular_file) ? "(f)" :
+				(node.type == smashfs_inode_type_symbolic_link) ? "(l)" :
 				"?",
 				name,
-				number);
+				node.number);
 	}
-	buffer  = buffer_buffer(&entry_buffer);
-	buffer += block * super.block_size;
-	buffer += index;
 	mode = 0;
-	if (owner_mode & smashfs_inode_mode_read) {
+	if (node.owner_mode & smashfs_inode_mode_read) {
 		mode |= S_IRUSR;
 	}
-	if (owner_mode & smashfs_inode_mode_write) {
+	if (node.owner_mode & smashfs_inode_mode_write) {
 		mode |= S_IWUSR;
 	}
-	if (owner_mode & smashfs_inode_mode_execute) {
+	if (node.owner_mode & smashfs_inode_mode_execute) {
 		mode |= S_IXUSR;
 	}
-	if (group_mode & smashfs_inode_mode_read) {
+	if (node.group_mode & smashfs_inode_mode_read) {
 		mode |= S_IRGRP;
 	}
-	if (group_mode & smashfs_inode_mode_write) {
+	if (node.group_mode & smashfs_inode_mode_write) {
 		mode |= S_IWGRP;
 	}
-	if (group_mode & smashfs_inode_mode_execute) {
+	if (node.group_mode & smashfs_inode_mode_execute) {
 		mode |= S_IXGRP;
 	}
-	if (other_mode & smashfs_inode_mode_read) {
+	if (node.other_mode & smashfs_inode_mode_read) {
 		mode |= S_IROTH;
 	}
-	if (other_mode & smashfs_inode_mode_write) {
+	if (node.other_mode & smashfs_inode_mode_write) {
 		mode |= S_IWOTH;
 	}
-	if (other_mode & smashfs_inode_mode_execute) {
+	if (node.other_mode & smashfs_inode_mode_execute) {
 		mode |= S_IXOTH;
 	}
-	if (type == smashfs_inode_type_directory) {
+	buffer  = buffer_buffer(&entry_buffer);
+	buffer += block.offset;
+	buffer += node.index;
+	if (node.type == smashfs_inode_type_directory) {
 		rc = mkdir(name, mode);
 		if (rc != 0 && errno != EEXIST) {
 			fprintf(stderr, "mkdir failed for: %s\n", name);
@@ -231,7 +218,7 @@ static void traverse (long long inode, const char *name, long long level)
 			fprintf(stderr, "chdir failed\n");
 			return;
 		}
-		bitbuffer_init_from_buffer(&bitbuffer, buffer, size);
+		bitbuffer_init_from_buffer(&bitbuffer, buffer, node.size);
 		directory_parent   = bitbuffer_getbits(&bitbuffer, super.bits.inode.directory.parent);
 		directory_nentries = bitbuffer_getbits(&bitbuffer, super.bits.inode.directory.nentries);
 		bitbuffer_uninit(&bitbuffer);
@@ -259,11 +246,11 @@ static void traverse (long long inode, const char *name, long long level)
 			return;
 		}
 		chmod((char *) name, mode);
-		rc = chown((char *) name, uid, gid);
+		rc = chown((char *) name, node.uid, node.gid);
 		if (rc != 0) {
 			fprintf(stderr, "chown failed\n");
 		}
-	} else if (type == smashfs_inode_type_regular_file) {
+	} else if (node.type == smashfs_inode_type_regular_file) {
 		if (debug > 1) {
 			fprintf(stdout, "]\n");
 		}
@@ -273,8 +260,8 @@ static void traverse (long long inode, const char *name, long long level)
 			fprintf(stderr, "open failed\n");
 			return;
 		}
-		rc = write(fd, buffer, size);
-		if (rc != size) {
+		rc = write(fd, buffer, node.size);
+		if (rc != node.size) {
 			fprintf(stderr, "write failed\n");
 			close(fd);
 			unlink(name);
@@ -282,11 +269,11 @@ static void traverse (long long inode, const char *name, long long level)
 		}
 		close(fd);
 		chmod((char *) name, mode);
-		rc = chown((char *) name, uid, gid);
+		rc = chown((char *) name, node.uid, node.gid);
 		if (rc != 0) {
 			fprintf(stderr, "chown failed\n");
 		}
-	} else if (type == smashfs_inode_type_symbolic_link) {
+	} else if (node.type == smashfs_inode_type_symbolic_link) {
 		if (debug > 1) {
 			fprintf(stdout, ", path: %s]\n", buffer);
 		}
@@ -297,7 +284,7 @@ static void traverse (long long inode, const char *name, long long level)
 			return;
 		}
 		chmod((char *) name, mode);
-		rc = lchown((char *) name, uid, gid);
+		rc = lchown((char *) name, node.uid, node.gid);
 		if (rc != 0) {
 			fprintf(stderr, "lchown failed\n");
 		}
@@ -466,6 +453,29 @@ int main (int argc, char *argv[])
 		}
 		r += rc;
 	}
+	fprintf(stdout, "reading block table\n");
+	rc = lseek(fd, super.blocks_offset, SEEK_SET);
+	if (rc != (int) super.blocks_offset) {
+		fprintf(stderr, "seek failed for blocks\n");
+		rc = -1;
+		goto bail;
+	}
+	r = 0;
+	while (r < super.blocks_size) {
+		rc = read(fd, buffer, bsize);
+		if (rc <= 0) {
+			fprintf(stderr, "read failed (rc: %d)\n", rc);
+			rc = -1;
+			goto bail;
+		}
+		rb = buffer_add(&block_buffer, buffer, rc);
+		if (rb != rc) {
+			fprintf(stderr, "buffer add failed\n");
+			rc = -1;
+			goto bail;
+		}
+		r += rc;
+	}
 	fprintf(stdout, "reading entries\n");
 	rc = lseek(fd, super.entries_offset, SEEK_SET);
 	if (rc != (int) super.entries_offset) {
@@ -573,6 +583,7 @@ bail:
 	free(source);
 	free(output);
 	buffer_uninit(&entry_buffer);
+	buffer_uninit(&block_buffer);
 	buffer_uninit(&inode_buffer);
 	free(cwd);
 	return rc;
