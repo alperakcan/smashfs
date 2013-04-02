@@ -281,7 +281,6 @@ static int output_write (void)
 	buffer_init(&entry_buffer);
 	HASH_ITER(hh, nodes_table, node, nnode) {
 		if (node->type == smashfs_inode_type_regular_file) {
-			bitbuffer_uninit(&bitbuffer);
 			rc = buffer_add(&entry_buffer, node->regular_file->content, node->regular_file->size);
 			if (rc < 0) {
 				fprintf(stdout, "buffer add failed\n");
