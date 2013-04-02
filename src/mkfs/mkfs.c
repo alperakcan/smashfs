@@ -158,6 +158,8 @@ static int nodes_sort_by_type (struct node *a, struct node *b)
 
 static int output_write (void)
 {
+	int fd;
+
 	ssize_t rc;
 	ssize_t size;
 
@@ -444,9 +446,9 @@ static int output_write (void)
 	bitbuffer_uninit(&bitbuffer);
 
 	fprintf(stdout, "  setting super block (1/3)\n");
-	super.inodes_offset  = 0;
+	super.inodes_offset  = sizeof(struct smashfs_super_block);
 	super.inodes_size    = buffer_length(&inode_buffer);
-	super.entries_offset = buffer_length(&inode_buffer);
+	super.entries_offset = super.inodes_offset + super.inodes_size;
 	super.entries_size   = buffer_length(&entry_buffer);
 
 	fprintf(stdout, "  filling super block\n");
@@ -505,6 +507,50 @@ static int output_write (void)
 	fprintf(stdout, "    inode: %lld bytes\n", buffer_length(&inode_buffer));
 	fprintf(stdout, "    entry: %lld bytes\n", buffer_length(&entry_buffer));
 	fprintf(stdout, "    total: %lld bytes\n", buffer_length(&super_buffer) + buffer_length(&inode_buffer) + buffer_length(&entry_buffer));
+
+	fd = open(output, O_CREAT | O_TRUNC | O_WRONLY, 0666);
+	if (fd < 0) {
+		fprintf(stderr, "open failed for %s\n", output);
+		buffer_uninit(&super_buffer);
+		buffer_uninit(&inode_buffer);
+		buffer_uninit(&entry_buffer);
+		return -1;
+	}
+
+	rc = write(fd, buffer_buffer(&super_buffer), buffer_length(&super_buffer));
+	if (rc != buffer_length(&super_buffer)) {
+		fprintf(stderr, "write failed\n");
+		close(fd);
+		unlink(output);
+		buffer_uninit(&super_buffer);
+		buffer_uninit(&inode_buffer);
+		buffer_uninit(&entry_buffer);
+		return -1;
+	}
+
+	rc = write(fd, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
+	if (rc != buffer_length(&inode_buffer)) {
+		fprintf(stderr, "write failed\n");
+		close(fd);
+		unlink(output);
+		buffer_uninit(&super_buffer);
+		buffer_uninit(&inode_buffer);
+		buffer_uninit(&entry_buffer);
+		return -1;
+	}
+
+	rc = write(fd, buffer_buffer(&entry_buffer), buffer_length(&entry_buffer));
+	if (rc != buffer_length(&entry_buffer)) {
+		fprintf(stderr, "write failed\n");
+		close(fd);
+		unlink(output);
+		buffer_uninit(&super_buffer);
+		buffer_uninit(&inode_buffer);
+		buffer_uninit(&entry_buffer);
+		return -1;
+	}
+
+	close(fd);
 
 	buffer_uninit(&super_buffer);
 	buffer_uninit(&inode_buffer);

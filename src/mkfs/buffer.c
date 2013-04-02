@@ -52,6 +52,11 @@ long long buffer_length (struct buffer *buffer)
 	return buffer->length;
 }
 
+void * buffer_buffer (struct buffer *buffer)
+{
+	return buffer->buffer;
+}
+
 int buffer_add (struct buffer *buffer, const void *data, unsigned int size)
 {
 	unsigned char *b;
@@ -72,7 +77,7 @@ int buffer_add (struct buffer *buffer, const void *data, unsigned int size)
 		free(buffer->buffer);
 		buffer->buffer = b;
 	}
-	memcpy(buffer->buffer, data, size);
+	memcpy(buffer->buffer + buffer->length, data, size);
 	buffer->length += size;
 	return size;
 }
