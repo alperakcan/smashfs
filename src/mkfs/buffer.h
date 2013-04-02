@@ -38,3 +38,4 @@ int buffer_uninit (struct buffer *buffer);
 long long buffer_length (struct buffer *buffer);
 void * buffer_buffer (struct buffer *buffer);
 int buffer_add (struct buffer *buffer, const void *data, unsigned int size);
+int buffer_set_size (struct buffer *buffer, unsigned int size);

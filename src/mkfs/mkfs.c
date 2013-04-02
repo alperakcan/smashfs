@@ -261,7 +261,6 @@ static int output_write (void)
 	super.min.inode.ctime = min_inode_ctime;
 	super.min.inode.mtime = min_inode_mtime;
 
-	super.bits.inode.number     = blog(max_inode_number);
 	super.bits.inode.type       = blog(max_inode_type);
 	super.bits.inode.owner_mode = blog(max_inode_owner_mode);
 	super.bits.inode.group_mode = blog(max_inode_group_mode);
@@ -393,7 +392,6 @@ static int output_write (void)
 	fprintf(stdout, "  calculating inode size\n");
 
 	max_inode_size  = 0;
-	max_inode_size += super.bits.inode.number;
 	max_inode_size += super.bits.inode.type;
 	max_inode_size += super.bits.inode.owner_mode;
 	max_inode_size += super.bits.inode.group_mode;
@@ -422,7 +420,6 @@ static int output_write (void)
 		return -1;
 	}
 	HASH_ITER(hh, nodes_table, node, nnode) {
-		bitbuffer_putbits(&bitbuffer, super.bits.inode.number    , node->number);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.type      , node->type);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.owner_mode, node->owner_mode);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.group_mode, node->group_mode);
@@ -471,7 +468,6 @@ static int output_write (void)
 		fprintf(stdout, "        ctime : 0x%08x, %u\n", super.min.inode.ctime, super.min.inode.ctime);
 		fprintf(stdout, "        mtime : 0x%08x, %u\n", super.min.inode.mtime, super.min.inode.mtime);
 		fprintf(stdout, "      inode:\n");
-		fprintf(stdout, "        number    : %u\n", super.bits.inode.number);
 		fprintf(stdout, "        type      : %u\n", super.bits.inode.type);
 		fprintf(stdout, "        owner_mode: %u\n", super.bits.inode.owner_mode);
 		fprintf(stdout, "        group_mode: %u\n", super.bits.inode.group_mode);

@@ -48,8 +48,16 @@ static char *source			= NULL;
 static char *output			= NULL;
 
 struct buffer inode_buffer;
+struct bitbuffer inode_bitbuffer	= BITBUFFER_INITIALIZER;
 struct buffer entry_buffer;
 struct smashfs_super_block super_block;
+
+long long max_inode_size;
+
+static void traverse (long long inode)
+{
+	bitbuffer_setpos(&inode_bitbuffer, inode * max_inode_size);
+}
 
 static void help_print (const char *pname)
 {
@@ -64,7 +72,12 @@ int main (int argc, char *argv[])
 	int c;
 	int fd;
 	int rc;
+	int rb;
+	unsigned int i;
+	unsigned int r;
 	int option_index;
+	unsigned int bsize;
+	unsigned char *buffer;
 	static struct option long_options[] = {
 		{"source"    , required_argument, 0, 's' },
 		{"output"    , required_argument, 0, 'o' },
@@ -73,6 +86,8 @@ int main (int argc, char *argv[])
 		{ 0          , 0                , 0,  0 }
 	};
 	fd = -1;
+	bsize = 0;
+	buffer = NULL;
 	rc = 0;
 	option_index = 0;
 	buffer_init(&inode_buffer);
@@ -123,7 +138,7 @@ int main (int argc, char *argv[])
 		rc = -1;
 		goto bail;
 	}
-	if (debug) {
+	if (debug > 0) {
 		fprintf(stdout, "  super block:\n");
 		fprintf(stdout, "    magic         : 0x%08x, %u\n", super_block.magic, super_block.magic);
 		fprintf(stdout, "    version       : 0x%08x, %u\n", super_block.version, super_block.version);
@@ -141,7 +156,6 @@ int main (int argc, char *argv[])
 		fprintf(stdout, "        ctime : 0x%08x, %u\n", super_block.min.inode.ctime, super_block.min.inode.ctime);
 		fprintf(stdout, "        mtime : 0x%08x, %u\n", super_block.min.inode.mtime, super_block.min.inode.mtime);
 		fprintf(stdout, "      inode:\n");
-		fprintf(stdout, "        number    : %u\n", super_block.bits.inode.number);
 		fprintf(stdout, "        type      : %u\n", super_block.bits.inode.type);
 		fprintf(stdout, "        owner_mode: %u\n", super_block.bits.inode.owner_mode);
 		fprintf(stdout, "        group_mode: %u\n", super_block.bits.inode.group_mode);
@@ -161,14 +175,88 @@ int main (int argc, char *argv[])
 		fprintf(stdout, "            number : %u\n", super_block.bits.inode.directory.entries.number);
 		fprintf(stdout, "        symbolic_link:\n");
 	}
+	bsize = 1024;
+	buffer = malloc(bsize);
+	if (buffer == NULL) {
+		fprintf(stderr, "malloc failed\n");
+		rc = -1;
+		goto bail;
+	}
 	rc = lseek(fd, super_block.inodes_offset, SEEK_SET);
 	if (rc != (int) super_block.inodes_offset) {
 		fprintf(stderr, "seek failed for inodes\n");
 		rc = -1;
 		goto bail;
 	}
+	r = 0;
+	while (r < super_block.inodes_size) {
+		rc = read(fd, buffer, bsize);
+		if (rc <= 0) {
+			fprintf(stderr, "read failed\n");
+			rc = -1;
+			goto bail;
+		}
+		rb = buffer_add(&inode_buffer, buffer, rc);
+		if (rb != rc) {
+			fprintf(stderr, "buffer add failed\n");
+			rc = -1;
+			goto bail;
+		}
+		r += rc;
+	}
+	rc = bitbuffer_init_from_buffer(&inode_bitbuffer, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
+	if (rc != 0) {
+		fprintf(stderr, "bitbuffer init from buffer failed\n");
+		rc = -1;
+		goto bail;
+	}
+	max_inode_size  = 0;
+	max_inode_size += super_block.bits.inode.type;
+	max_inode_size += super_block.bits.inode.owner_mode;
+	max_inode_size += super_block.bits.inode.group_mode;
+	max_inode_size += super_block.bits.inode.other_mode;
+	max_inode_size += super_block.bits.inode.uid;
+	max_inode_size += super_block.bits.inode.gid;
+	max_inode_size += super_block.bits.inode.ctime;
+	max_inode_size += super_block.bits.inode.mtime;
+	max_inode_size += super_block.bits.inode.size;
+	max_inode_size += super_block.bits.inode.block;
+	max_inode_size += super_block.bits.inode.index;
+	if (debug > 1) {
+		fprintf(stdout, "  inodes:\n");
+		#define print_inode_bitvalue(a) { \
+			long long bitvalue; \
+			if (super_block.bits.inode.a > 0) { \
+				bitvalue = bitbuffer_getbits(&inode_bitbuffer, super_block.bits.inode.a); \
+				fprintf(stdout, "      %-10s: %lld\n", # a, bitvalue); \
+			} \
+		}
+		for (i = 0; i < super_block.inodes; i++) {
+			fprintf(stdout, "    inode: %d\n", i);
+			print_inode_bitvalue(type);
+			print_inode_bitvalue(owner_mode);
+			print_inode_bitvalue(group_mode);
+			print_inode_bitvalue(other_mode);
+			print_inode_bitvalue(uid);
+			print_inode_bitvalue(gid);
+			print_inode_bitvalue(ctime);
+			print_inode_bitvalue(mtime);
+			print_inode_bitvalue(size);
+			print_inode_bitvalue(block);
+			print_inode_bitvalue(index);
+		}
+	}
+	rc = mkdir(output, 0666);
+	if (rc != 0) {
+		fprintf(stderr, "mkdir failed for: %s\n", output);
+		rc = -1;
+		goto bail;
+	}
+	traverse(super_block.root);
 	rc = 0;
 bail:
+	bitbuffer_uninit(&inode_bitbuffer);
+	free(buffer);
 	close(fd);
 	free(source);
 	free(output);

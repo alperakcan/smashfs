@@ -27,6 +27,15 @@
  * either expressed or implied, of the FreeBSD Project.
  */
 
+#define BITBUFFER_INITIALIZER { \
+	.buffer = NULL, \
+	.end = NULL, \
+	.size = 0, \
+	.bsize = 0, \
+	.index = 0, \
+	.external = 0, \
+}
+
 struct bitbuffer {
 	unsigned char *buffer;
 	unsigned char *end;

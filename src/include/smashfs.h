@@ -65,7 +65,6 @@ struct smashfs_super_block {
 	uint32_t entries_size;
 	struct {
 		struct {
-			uint32_t number;
 			uint32_t type;
 			uint32_t owner_mode;
 			uint32_t group_mode;
