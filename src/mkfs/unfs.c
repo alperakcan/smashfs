@@ -49,7 +49,7 @@ static char *source			= NULL;
 static char *output			= NULL;
 
 struct buffer inode_buffer		= BUFFER_INITIALIZER;
-struct bitbuffer inode_bitbuffer	= BITBUFFER_INITIALIZER;
+struct buffer block_buffer		= BUFFER_INITIALIZER;
 struct buffer entry_buffer		= BUFFER_INITIALIZER;
 struct smashfs_super_block super;
 
@@ -81,19 +81,25 @@ static void traverse (long long inode, const char *name, long long level)
 	unsigned char *buffer;
 	struct bitbuffer bitbuffer;
 	(void) mtime;
-	bitbuffer_setpos(&inode_bitbuffer, inode * max_inode_size);
+	rc = bitbuffer_init_from_buffer(&bitbuffer, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
+	if (rc != 0) {
+		fprintf(stderr, "bitbuffer init from buffer failed\n");
+		return;
+	}
+	bitbuffer_setpos(&bitbuffer, inode * max_inode_size);
 	number     = inode;
-	type       = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.type);
-	owner_mode = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.owner_mode);
-	group_mode = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.group_mode);
-	other_mode = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.other_mode);
-	uid        = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.uid);
-	gid        = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.gid);
-	ctime      = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.ctime);
-	mtime      = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.mtime);
-	size       = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.size);
-	block      = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.block);
-	index      = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.index);
+	type       = bitbuffer_getbits(&bitbuffer, super.bits.inode.type);
+	owner_mode = bitbuffer_getbits(&bitbuffer, super.bits.inode.owner_mode);
+	group_mode = bitbuffer_getbits(&bitbuffer, super.bits.inode.group_mode);
+	other_mode = bitbuffer_getbits(&bitbuffer, super.bits.inode.other_mode);
+	uid        = bitbuffer_getbits(&bitbuffer, super.bits.inode.uid);
+	gid        = bitbuffer_getbits(&bitbuffer, super.bits.inode.gid);
+	ctime      = bitbuffer_getbits(&bitbuffer, super.bits.inode.ctime);
+	mtime      = bitbuffer_getbits(&bitbuffer, super.bits.inode.mtime);
+	size       = bitbuffer_getbits(&bitbuffer, super.bits.inode.size);
+	block      = bitbuffer_getbits(&bitbuffer, super.bits.inode.block);
+	index      = bitbuffer_getbits(&bitbuffer, super.bits.inode.index);
+	bitbuffer_uninit(&bitbuffer);
 	if (super.bits.inode.group_mode == 0) {
 		group_mode = owner_mode;
 	}
@@ -336,9 +342,12 @@ int main (int argc, char *argv[])
 		fprintf(stdout, "    block_size    : 0x%08x, %u\n", super.block_size, super.block_size);
 		fprintf(stdout, "    block_log2    : 0x%08x, %u\n", super.block_log2, super.block_log2);
 		fprintf(stdout, "    inodes        : 0x%08x, %u\n", super.inodes, super.inodes);
+		fprintf(stdout, "    blocks        : 0x%08x, %u\n", super.blocks, super.blocks);
 		fprintf(stdout, "    root          : 0x%08x, %u\n", super.root, super.root);
 		fprintf(stdout, "    inodes_offset : 0x%08x, %u\n", super.inodes_offset, super.inodes_offset);
 		fprintf(stdout, "    inodes_size   : 0x%08x, %u\n", super.inodes_size, super.inodes_size);
+		fprintf(stdout, "    blocks_offset : 0x%08x, %u\n", super.blocks_offset, super.blocks_offset);
+		fprintf(stdout, "    blocks_size   : 0x%08x, %u\n", super.blocks_size, super.blocks_size);
 		fprintf(stdout, "    entries_offset: 0x%08x, %u\n", super.entries_offset, super.entries_offset);
 		fprintf(stdout, "    entries_size  : 0x%08x, %u\n", super.entries_size, super.entries_size);
 		fprintf(stdout, "    bits:\n");
@@ -364,6 +373,10 @@ int main (int argc, char *argv[])
 		fprintf(stdout, "          entries:\n");
 		fprintf(stdout, "            number : %u\n", super.bits.inode.directory.entries.number);
 		fprintf(stdout, "        symbolic_link:\n");
+		fprintf(stdout, "      block:\n");
+		fprintf(stdout, "        offset         : %u\n", super.bits.block.offset);
+		fprintf(stdout, "        size           : %u\n", super.bits.block.size);
+		fprintf(stdout, "        compressed_size: %u\n", super.bits.block.compressed_size);
 	}
 	fprintf(stdout, "reading inode table\n");
 	bsize = 1024;
@@ -406,7 +419,7 @@ int main (int argc, char *argv[])
 	while (r < super.entries_size) {
 		rc = read(fd, buffer, bsize);
 		if (rc <= 0) {
-			fprintf(stderr, "read failed\n");
+			fprintf(stderr, "read failed (rc: %d)\n", rc);
 			rc = -1;
 			goto bail;
 		}
@@ -417,12 +430,6 @@ int main (int argc, char *argv[])
 			goto bail;
 		}
 		r += rc;
-	}
-	rc = bitbuffer_init_from_buffer(&inode_bitbuffer, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
-	if (rc != 0) {
-		fprintf(stderr, "bitbuffer init from buffer failed\n");
-		rc = -1;
-		goto bail;
 	}
 	max_inode_size  = 0;
 	max_inode_size += super.bits.inode.type;
@@ -437,11 +444,18 @@ int main (int argc, char *argv[])
 	max_inode_size += super.bits.inode.block;
 	max_inode_size += super.bits.inode.index;
 	if (debug > 2) {
+		struct bitbuffer bitbuffer;
+		rc = bitbuffer_init_from_buffer(&bitbuffer, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
+		if (rc != 0) {
+			fprintf(stderr, "bitbuffer init from buffer failed\n");
+			rc = -1;
+			goto bail;
+		}
 		fprintf(stdout, "  inodes:\n");
 		#define print_inode_bitvalue(a) { \
 			long long bitvalue; \
 			if (super.bits.inode.a > 0) { \
-				bitvalue = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.a); \
+				bitvalue = bitbuffer_getbits(&bitbuffer, super.bits.inode.a); \
 				fprintf(stdout, "      %-10s: %lld\n", # a, bitvalue); \
 			} \
 		}
@@ -459,6 +473,7 @@ int main (int argc, char *argv[])
 			print_inode_bitvalue(block);
 			print_inode_bitvalue(index);
 		}
+		bitbuffer_uninit(&bitbuffer);
 	}
 	fprintf(stdout, "creating output directory: %s\n", output);
 	rc = mkdir(output, 0777);
@@ -491,7 +506,6 @@ int main (int argc, char *argv[])
 	rc = 0;
 	fprintf(stdout, "finished\n");
 bail:
-	bitbuffer_uninit(&inode_bitbuffer);
 	free(buffer);
 	close(fd);
 	free(source);

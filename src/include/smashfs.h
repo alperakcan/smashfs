@@ -33,6 +33,11 @@
 
 #define SMASHFS_START				0
 
+enum smashfs_compression_type {
+	smashfs_compression_type_none		= 0x00,
+	smashfs_compression_type_gzip		= 0x01,
+};
+
 enum smashfs_inode_type {
 	smashfs_inode_type_regular_file		= 0x01,
 	smashfs_inode_type_directory		= 0x02,
@@ -41,14 +46,12 @@ enum smashfs_inode_type {
 	smashfs_inode_type_symbolic_link	= 0x05,
 	smashfs_inode_type_fifo			= 0x06,
 	smashfs_inode_type_socket		= 0x07,
-	smashfs_inode_type_mask			= 0x07
 };
 
 enum smashfs_inode_mode {
 	smashfs_inode_mode_read			= 0x01,
 	smashfs_inode_mode_write		= 0x02,
 	smashfs_inode_mode_execute		= 0x04,
-	smashfs_inode_mode_mask			= 0x07
 };
 
 struct smashfs_super_block {
@@ -56,13 +59,17 @@ struct smashfs_super_block {
 	uint32_t version;
 	uint32_t ctime;
 	uint32_t inodes;
+	uint32_t blocks;
 	uint32_t block_size;
 	uint32_t block_log2;
 	uint32_t root;
 	uint32_t inodes_offset;
 	uint32_t inodes_size;
+	uint32_t blocks_offset;
+	uint32_t blocks_size;
 	uint32_t entries_offset;
 	uint32_t entries_size;
+	uint32_t compression_type;
 	struct {
 		struct {
 			uint32_t type;
@@ -91,6 +98,11 @@ struct smashfs_super_block {
 				char path[0];
 			} symbolic_link;
 		} inode;
+		struct {
+			uint32_t offset;
+			uint32_t size;
+			uint32_t compressed_size;
+		} block;
 	} bits;
 	struct {
 		struct {

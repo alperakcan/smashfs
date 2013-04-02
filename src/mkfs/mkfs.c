@@ -47,6 +47,7 @@
 #include "uthash.h"
 #include "buffer.h"
 #include "bitbuffer.h"
+#include "compressor.h"
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
@@ -102,6 +103,12 @@ struct node {
 	UT_hash_handle hh;
 };
 
+struct block {
+	long long offset;
+	long long size;
+	long long compressed_size;
+};
+
 static LIST_HEAD(sources, source) sources;
 
 static unsigned long long nduplicates		= 0;
@@ -121,6 +128,8 @@ static int no_uid				= 0;
 static int no_gid				= 0;
 static int no_ctime				= 0;
 static int no_mtime				= 0;
+
+static struct compressor *compressor		= NULL;
 
 static unsigned int slog (unsigned int block)
 {
@@ -173,6 +182,11 @@ static int output_write (void)
 	long long e;
 	long long s;
 
+	unsigned int b;
+	unsigned char *bb;
+	unsigned char *bc;
+	struct block *blocks;
+
 	struct node *node;
 	struct node *nnode;
 
@@ -202,14 +216,20 @@ static int output_write (void)
 	long long max_inode_directory_nentries;
 	long long max_inode_directory_entries_number;
 
+	long long max_block_offset;
+	long long max_block_size;
+	long long max_block_compressed_size;
+
 	struct buffer inode_buffer;
+	struct buffer block_buffer;
 	struct buffer entry_buffer;
 	struct buffer super_buffer;
+	struct buffer entry_cbuffer;
 	struct bitbuffer bitbuffer;
 
 	fprintf(stdout, "writing file: %s\n", output);
 
-	fprintf(stdout, "  calculating super max/min bits (1/2)\n");
+	fprintf(stdout, "  calculating super max/min bits (1/3)\n");
 
 	min_inode_ctime      = LONG_LONG_MAX;
 	min_inode_mtime      = LONG_LONG_MAX;
@@ -262,15 +282,16 @@ static int output_write (void)
 	if (no_ctime)      { max_inode_ctime = -1; }
 	if (no_mtime)      { max_inode_mtime = -1; }
 
-	fprintf(stdout, "  setting super block (1/3)\n");
+	fprintf(stdout, "  setting super block (1/4)\n");
 
-	super.magic      = SMASHFS_MAGIC;
-	super.version    = SMASHFS_VERSION_0;
-	super.ctime      = 0;
-	super.block_size = block_size;
-	super.block_log2 = slog(block_size);
-	super.inodes     = HASH_CNT(hh, nodes_table);
-	super.root       = 0;
+	super.magic            = SMASHFS_MAGIC;
+	super.version          = SMASHFS_VERSION_0;
+	super.ctime            = 0;
+	super.block_size       = block_size;
+	super.block_log2       = slog(block_size);
+	super.inodes           = HASH_CNT(hh, nodes_table);
+	super.root             = 0;
+	super.compression_type = compressor_type(compressor);
 
 	super.min.inode.ctime = min_inode_ctime;
 	super.min.inode.mtime = min_inode_mtime;
@@ -386,7 +407,7 @@ static int output_write (void)
 		}
 	}
 
-	fprintf(stdout, "  calculating super max/min bits (2/2)\n");
+	fprintf(stdout, "  calculating super max/min bits (2/3)\n");
 
 	max_inode_size  = -1;
 	max_inode_block = -1;
@@ -397,11 +418,113 @@ static int output_write (void)
 		max_inode_index = MAX(max_inode_index, node->index);
 	}
 
-	fprintf(stdout, "  setting super block (2/3)\n");
+	fprintf(stdout, "  setting super block (2/4)\n");
+
+	super.blocks = (buffer_length(&entry_buffer) + (super.block_size - 1)) >> super.block_log2;
 
 	super.bits.inode.size  = blog(max_inode_size);
 	super.bits.inode.block = blog(max_inode_block);
 	super.bits.inode.index = blog(max_inode_index);
+
+	fprintf(stdout, "  compressing %d blocks:\n", super.blocks);
+
+	blocks = malloc(super.blocks * sizeof(struct block));
+	if (blocks == NULL) {
+		fprintf(stderr, "malloc failed\n");
+		buffer_uninit(&entry_buffer);
+		return -1;
+	}
+	bc = malloc(super.block_size * 2);
+	if (bc == NULL) {
+		fprintf(stderr, "malloc failed\n");
+		free(blocks);
+		buffer_uninit(&entry_buffer);
+		return -1;
+	}
+	buffer_init(&entry_cbuffer);
+	bb = buffer_buffer(&entry_buffer);
+	max_block_offset = 0;
+	for (b = 0; b < super.blocks; b++) {
+		if (debug > 1) {
+			fprintf(stdout, "    compressing block: %d\n", b);
+		}
+		blocks[b].offset = max_block_offset;
+		blocks[b].size = MIN(super.block_size, buffer_length(&entry_buffer) - (bb - ((unsigned char *) buffer_buffer(&entry_buffer))));
+		rc = compressor_compress(compressor, bb, blocks[b].size, bc, super.block_size * 2);
+		if (rc < 0) {
+			fprintf(stderr, "compress failed\n");
+			free(bc);
+			free(blocks);
+			buffer_uninit(&entry_cbuffer);
+			buffer_uninit(&entry_buffer);
+			return -1;
+		}
+		blocks[b].compressed_size = rc;
+		if (buffer_add(&entry_cbuffer, bc, rc) != rc) {
+			fprintf(stderr, "buffer add failed\n");
+			free(bc);
+			free(blocks);
+			buffer_uninit(&entry_cbuffer);
+			buffer_uninit(&entry_buffer);
+			return -1;
+		}
+		bb += super.block_size;
+		max_block_offset += rc;
+	}
+
+	fprintf(stdout, "  calculating super max/min bits (3/3)\n");
+
+	max_block_offset          = -1;
+	max_block_size            = -1;
+	max_block_compressed_size = -1;
+	for (b = 0; b < super.blocks; b++) {
+		max_block_offset          = MAX(max_block_offset, blocks[b].offset);
+		max_block_size            = MAX(max_block_size, blocks[b].size);
+		max_block_compressed_size = MAX(max_block_compressed_size, blocks[b].compressed_size);
+	}
+
+	fprintf(stdout, "  setting super block (3/4)\n");
+
+	super.bits.block.offset          = blog(max_block_offset);
+	super.bits.block.size            = blog(max_block_size);
+	super.bits.block.compressed_size = blog(max_block_compressed_size);
+
+	size  = 0;
+	size += super.bits.block.offset;
+	size += super.bits.block.size;
+	size += super.bits.block.compressed_size;
+	size = (super.blocks * size + 7) / 8;
+
+	rc = bitbuffer_init(&bitbuffer, size);
+	if (rc != 0) {
+		fprintf(stderr, "bitbuffer init failed\n");
+		free(bc);
+		free(blocks);
+		buffer_uninit(&entry_cbuffer);
+		buffer_uninit(&entry_buffer);
+		return -1;
+	}
+	for (b = 0; b < super.blocks; b++) {
+		bitbuffer_putbits(&bitbuffer, super.bits.block.offset, blocks[b].offset);
+		bitbuffer_putbits(&bitbuffer, super.bits.block.size, blocks[b].size);
+		bitbuffer_putbits(&bitbuffer, super.bits.block.compressed_size, blocks[b].compressed_size);
+	}
+
+	buffer_init(&block_buffer);
+	rc = buffer_add(&block_buffer, bitbuffer_buffer(&bitbuffer), size);
+	if (rc < 0) {
+		fprintf(stdout, "buffer add failed\n");
+		free(bc);
+		free(blocks);
+		bitbuffer_uninit(&bitbuffer);
+		buffer_uninit(&entry_cbuffer);
+		buffer_uninit(&entry_buffer);
+		return -1;
+	}
+
+	bitbuffer_uninit(&bitbuffer);
+	free(blocks);
+	free(bc);
 
 	fprintf(stdout, "  calculating inode size\n");
 
@@ -430,7 +553,9 @@ static int output_write (void)
 	if (rc != 0) {
 		fprintf(stderr, "bitbuffer init failed\n");
 		buffer_uninit(&inode_buffer);
+		buffer_uninit(&block_buffer);
 		buffer_uninit(&entry_buffer);
+		buffer_uninit(&entry_cbuffer);
 		return -1;
 	}
 	HASH_ITER(hh, nodes_table, node, nnode) {
@@ -454,15 +579,20 @@ static int output_write (void)
 		fprintf(stdout, "buffer add failed\n");
 		bitbuffer_uninit(&bitbuffer);
 		buffer_uninit(&inode_buffer);
+		buffer_uninit(&block_buffer);
 		buffer_uninit(&entry_buffer);
+		buffer_uninit(&entry_cbuffer);
 		return -1;
 	}
 	bitbuffer_uninit(&bitbuffer);
 
-	fprintf(stdout, "  setting super block (1/3)\n");
+	fprintf(stdout, "  setting super block (4/4)\n");
+
 	super.inodes_offset  = sizeof(struct smashfs_super_block);
 	super.inodes_size    = buffer_length(&inode_buffer);
-	super.entries_offset = super.inodes_offset + super.inodes_size;
+	super.blocks_offset  = super.inodes_offset + super.inodes_size;
+	super.blocks_size     = buffer_length(&block_buffer);
+	super.entries_offset = super.blocks_offset + super.blocks_size;
 	super.entries_size   = buffer_length(&entry_buffer);
 
 	fprintf(stdout, "  filling super block\n");
@@ -475,9 +605,12 @@ static int output_write (void)
 		fprintf(stdout, "    block_size    : 0x%08x, %u\n", super.block_size, super.block_size);
 		fprintf(stdout, "    block_log2    : 0x%08x, %u\n", super.block_log2, super.block_log2);
 		fprintf(stdout, "    inodes        : 0x%08x, %u\n", super.inodes, super.inodes);
+		fprintf(stdout, "    blocks        : 0x%08x, %u\n", super.blocks, super.blocks);
 		fprintf(stdout, "    root          : 0x%08x, %u\n", super.root, super.root);
 		fprintf(stdout, "    inodes_offset : 0x%08x, %u\n", super.inodes_offset, super.inodes_offset);
 		fprintf(stdout, "    inodes_size   : 0x%08x, %u\n", super.inodes_size, super.inodes_size);
+		fprintf(stdout, "    blocks_offset : 0x%08x, %u\n", super.blocks_offset, super.blocks_offset);
+		fprintf(stdout, "    blocks_size   : 0x%08x, %u\n", super.blocks_size, super.blocks_size);
 		fprintf(stdout, "    entries_offset: 0x%08x, %u\n", super.entries_offset, super.entries_offset);
 		fprintf(stdout, "    entries_size  : 0x%08x, %u\n", super.entries_size, super.entries_size);
 		fprintf(stdout, "    bits:\n");
@@ -503,6 +636,10 @@ static int output_write (void)
 		fprintf(stdout, "          entries:\n");
 		fprintf(stdout, "            number : %u\n", super.bits.inode.directory.entries.number);
 		fprintf(stdout, "        symbolic_link:\n");
+		fprintf(stdout, "      block:\n");
+		fprintf(stdout, "        offset         : %u\n", super.bits.block.offset);
+		fprintf(stdout, "        size           : %u\n", super.bits.block.size);
+		fprintf(stdout, "        compressed_size: %u\n", super.bits.block.compressed_size);
 	}
 
 	buffer_init(&super_buffer);
@@ -510,21 +647,28 @@ static int output_write (void)
 	if (rc < 0) {
 		fprintf(stderr, "buffer add failed for super block\n");
 		buffer_uninit(&super_buffer);
+		buffer_uninit(&block_buffer);
 		buffer_uninit(&inode_buffer);
 		buffer_uninit(&entry_buffer);
+		buffer_uninit(&entry_cbuffer);
 		return -1;
 	}
 
 	fprintf(stdout, "  buffers:\n");
 	fprintf(stdout, "    super: %lld bytes\n", buffer_length(&super_buffer));
 	fprintf(stdout, "    inode: %lld bytes\n", buffer_length(&inode_buffer));
+	fprintf(stdout, "    block: %lld bytes\n", buffer_length(&block_buffer));
 	fprintf(stdout, "    entry: %lld bytes\n", buffer_length(&entry_buffer));
-	fprintf(stdout, "    total: %lld bytes\n", buffer_length(&super_buffer) + buffer_length(&inode_buffer) + buffer_length(&entry_buffer));
+	fprintf(stdout, "           %lld bytes\n", buffer_length(&entry_cbuffer));
+	fprintf(stdout, "    total: %lld bytes\n", buffer_length(&super_buffer) + buffer_length(&inode_buffer) + buffer_length(&block_buffer) + buffer_length(&entry_cbuffer));
 
 	fd = open(output, O_CREAT | O_TRUNC | O_WRONLY, 0666);
 	if (fd < 0) {
 		fprintf(stderr, "open failed for %s\n", output);
+		free(bc);
+		buffer_uninit(&entry_cbuffer);
 		buffer_uninit(&super_buffer);
+		buffer_uninit(&block_buffer);
 		buffer_uninit(&inode_buffer);
 		buffer_uninit(&entry_buffer);
 		return -1;
@@ -535,7 +679,10 @@ static int output_write (void)
 		fprintf(stderr, "write failed\n");
 		close(fd);
 		unlink(output);
+		free(bc);
+		buffer_uninit(&entry_cbuffer);
 		buffer_uninit(&super_buffer);
+		buffer_uninit(&block_buffer);
 		buffer_uninit(&inode_buffer);
 		buffer_uninit(&entry_buffer);
 		return -1;
@@ -546,27 +693,48 @@ static int output_write (void)
 		fprintf(stderr, "write failed\n");
 		close(fd);
 		unlink(output);
+		free(bc);
+		buffer_uninit(&entry_cbuffer);
 		buffer_uninit(&super_buffer);
+		buffer_uninit(&block_buffer);
 		buffer_uninit(&inode_buffer);
 		buffer_uninit(&entry_buffer);
 		return -1;
 	}
 
-	rc = write(fd, buffer_buffer(&entry_buffer), buffer_length(&entry_buffer));
-	if (rc != buffer_length(&entry_buffer)) {
+	rc = write(fd, buffer_buffer(&block_buffer), buffer_length(&block_buffer));
+	if (rc != buffer_length(&block_buffer)) {
 		fprintf(stderr, "write failed\n");
 		close(fd);
 		unlink(output);
+		free(bc);
+		buffer_uninit(&entry_cbuffer);
 		buffer_uninit(&super_buffer);
+		buffer_uninit(&block_buffer);
+		buffer_uninit(&inode_buffer);
+		buffer_uninit(&entry_buffer);
+		return -1;
+	}
+
+	rc = write(fd, buffer_buffer(&entry_cbuffer), buffer_length(&entry_cbuffer));
+	if (rc != buffer_length(&entry_cbuffer)) {
+		fprintf(stderr, "write failed\n");
+		close(fd);
+		unlink(output);
+		free(bc);
+		buffer_uninit(&entry_cbuffer);
+		buffer_uninit(&super_buffer);
+		buffer_uninit(&block_buffer);
 		buffer_uninit(&inode_buffer);
 		buffer_uninit(&entry_buffer);
 		return -1;
 	}
 
 	close(fd);
-
+	buffer_uninit(&entry_cbuffer);
 	buffer_uninit(&super_buffer);
 	buffer_uninit(&inode_buffer);
+	buffer_uninit(&block_buffer);
 	buffer_uninit(&entry_buffer);
 
 	return 0;
@@ -915,6 +1083,7 @@ int main (int argc, char *argv[])
 		{"source"       , required_argument, 0, 's' },
 		{"output"       , required_argument, 0, 'o' },
 		{"block_size"   , required_argument, 0, 'b' },
+		{"compressor"   , required_argument, 0, 'c' },
 		{"debug"        , no_argument      , 0, 'd' },
 		{"no_group_mode", no_argument      , 0, 0x100 },
 		{"no_other_mode", no_argument      , 0, 0x101 },
@@ -927,7 +1096,8 @@ int main (int argc, char *argv[])
 	};
 	rc = 0;
 	option_index = 0;
-	while ((c = getopt_long(argc, argv, "hds:o:b:g:t:", long_options, &option_index)) != -1) {
+	compressor = compressor_create_name("none");
+	while ((c = getopt_long(argc, argv, "hds:o:b:c:", long_options, &option_index)) != -1) {
 		switch (c) {
 			case 's':
 				source = malloc(sizeof(struct source));
@@ -955,6 +1125,14 @@ int main (int argc, char *argv[])
 				block_size = atoi(optarg);
 				block_size = MIN(block_size, 1 << 20);
 				block_size = MAX(block_size, 1 << 12);
+				break;
+			case 'c':
+				compressor_destroy(compressor);
+				compressor = compressor_create_name(optarg);
+				if (compressor == NULL) {
+					fprintf(stderr, "compressor create failed\n");
+					break;
+				}
 				break;
 			case 'd':
 				debug += 1;
@@ -996,8 +1174,18 @@ int main (int argc, char *argv[])
 		rc = -1;
 		goto bail;
 	}
+	if (compressor == NULL) {
+		fprintf(stderr, "compressor is invalid.\n");
+		rc = -1;
+		goto bail;
+	}
 	sources_scan();
-	output_write();
+	rc = output_write();
+	if (rc != 0) {
+		fprintf(stderr, "output write failed\n");
+		rc = -1;
+		goto bail;
+	}
 	fprintf(stdout, "statistics:\n");
 	fprintf(stdout, "  duplicates    : %lld\n", nduplicates);
 	fprintf(stdout, "  regular_files : %lld\n", nregular_files);
@@ -1014,5 +1202,6 @@ bail:
 		node_delete(node);
 	}
 	free(output);
+	compressor_destroy(compressor);
 	return rc;
 }

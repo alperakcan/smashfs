@@ -1,10 +1,13 @@
 
 #include <string.h>
 
-int none_compress (void *data, unsigned int size)
+int none_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
-	(void) data;
-	return size;
+	if (dsize < ssize) {
+		return -1;
+	}
+	memcpy(dst, src, ssize);
+	return ssize;
 }
 
 int none_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
@@ -13,5 +16,5 @@ int none_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsiz
 		return -1;
 	}
 	memcpy(dst, src, ssize);
-	return dsize;
+	return ssize;
 }
