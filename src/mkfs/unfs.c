@@ -245,11 +245,6 @@ static void traverse (long long inode, const char *name, long long level)
 			fprintf(stderr, "chdir failed\n");
 			return;
 		}
-		chmod((char *) name, mode);
-		rc = chown((char *) name, node.uid, node.gid);
-		if (rc != 0) {
-			fprintf(stderr, "chown failed\n");
-		}
 	} else if (node.type == smashfs_inode_type_regular_file) {
 		if (debug > 1) {
 			fprintf(stdout, "]\n");
@@ -268,11 +263,6 @@ static void traverse (long long inode, const char *name, long long level)
 			return;
 		}
 		close(fd);
-		chmod((char *) name, mode);
-		rc = chown((char *) name, node.uid, node.gid);
-		if (rc != 0) {
-			fprintf(stderr, "chown failed\n");
-		}
 	} else if (node.type == smashfs_inode_type_symbolic_link) {
 		if (debug > 1) {
 			fprintf(stdout, ", path: %s]\n", buffer);
@@ -283,11 +273,14 @@ static void traverse (long long inode, const char *name, long long level)
 			fprintf(stderr, "symlink failed\n");
 			return;
 		}
-		chmod((char *) name, mode);
-		rc = lchown((char *) name, node.uid, node.gid);
-		if (rc != 0) {
-			fprintf(stderr, "lchown failed\n");
-		}
+	} else {
+		fprintf(stderr, "unknown type: %d\n", node.type);
+		return;
+	}
+	chmod((char *) name, mode);
+	rc = lchown((char *) name, node.uid, node.gid);
+	if (rc != 0) {
+		fprintf(stderr, "lchown failed\n");
 	}
 }
 
