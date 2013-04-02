@@ -1,6 +1,7 @@
 
 target.host-y = \
-	mkfs.smashfs
+	mkfs.smashfs \
+	unfs.smashfs
 
 mkfs.smashfs_files-y = \
 	mkfs.c \
@@ -10,7 +11,12 @@ mkfs.smashfs_files-y = \
 mkfs.smashfs_cflags-y = \
 	-U_FILE_OFFSET_BITS
 
-mkfs.smashfs_ldflags-y = \
-	-lz
+unfs.smashfs_files-y = \
+	unfs.c \
+	buffer.c \
+	bitbuffer.c
+
+unfs.smashfs_cflags-y = \
+	-U_FILE_OFFSET_BITS
 
 include ../../Makefile.lib

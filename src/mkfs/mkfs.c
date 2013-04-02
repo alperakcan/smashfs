@@ -113,7 +113,7 @@ static struct node *nodes_table			= NULL;
 
 static int debug				= 0;
 static char *output				= NULL;
-static unsigned int block_size			= 4096;
+static unsigned int block_size			= 128 * 1024;
 
 static unsigned int slog (unsigned int block)
 {
@@ -246,7 +246,7 @@ static int output_write (void)
 		}
 	}
 
-	fprintf(stdout, "  setting super block (1/2)\n");
+	fprintf(stdout, "  setting super block (1/3)\n");
 
 	super.magic      = SMASHFS_MAGIC;
 	super.version    = SMASHFS_VERSION_0;
@@ -274,9 +274,11 @@ static int output_write (void)
 	super.bits.inode.directory.entries.number = blog(max_inode_directory_entries_number);
 
 	fprintf(stdout, "  sorting inodes table by type\n");
+
 	HASH_SRT(hh, nodes_table, nodes_sort_by_type);
 
 	fprintf(stdout, "  filling entry blocks\n");
+
 	offset = 0;
 	buffer_init(&entry_buffer);
 	HASH_ITER(hh, nodes_table, node, nnode) {
@@ -380,7 +382,7 @@ static int output_write (void)
 		max_inode_index = MAX(max_inode_index, node->index);
 	}
 
-	fprintf(stdout, "  setting super block (2/2)\n");
+	fprintf(stdout, "  setting super block (2/3)\n");
 
 	super.bits.inode.size  = blog(max_inode_size);
 	super.bits.inode.block = blog(max_inode_block);
@@ -404,6 +406,7 @@ static int output_write (void)
 	size = (super.inodes * max_inode_size + 7) / 8;
 
 	fprintf(stdout, "  sorting inodes table by number\n");
+
 	HASH_SRT(hh, nodes_table, nodes_sort_by_number);
 
 	fprintf(stdout, "  filling inodes table\n");
@@ -440,17 +443,27 @@ static int output_write (void)
 	}
 	bitbuffer_uninit(&bitbuffer);
 
+	fprintf(stdout, "  setting super block (1/3)\n");
+	super.inodes_offset  = 0;
+	super.inodes_size    = buffer_length(&inode_buffer);
+	super.entries_offset = buffer_length(&inode_buffer);
+	super.entries_size   = buffer_length(&entry_buffer);
+
 	fprintf(stdout, "  filling super block\n");
 
 	if (debug) {
 		fprintf(stdout, "  super block:\n");
-		fprintf(stdout, "    magic     : 0x%08x, %u\n", super.magic, super.magic);
-		fprintf(stdout, "    version   : 0x%08x, %u\n", super.version, super.version);
-		fprintf(stdout, "    ctime     : 0x%08x, %u\n", super.ctime, super.ctime);
-		fprintf(stdout, "    block_size: 0x%08x, %u\n", super.block_size, super.block_size);
-		fprintf(stdout, "    block_log2: 0x%08x, %u\n", super.block_log2, super.block_log2);
-		fprintf(stdout, "    inodes    : 0x%08x, %u\n", super.inodes, super.inodes);
-		fprintf(stdout, "    root      : 0x%08x, %u\n", super.root, super.root);
+		fprintf(stdout, "    magic         : 0x%08x, %u\n", super.magic, super.magic);
+		fprintf(stdout, "    version       : 0x%08x, %u\n", super.version, super.version);
+		fprintf(stdout, "    ctime         : 0x%08x, %u\n", super.ctime, super.ctime);
+		fprintf(stdout, "    block_size    : 0x%08x, %u\n", super.block_size, super.block_size);
+		fprintf(stdout, "    block_log2    : 0x%08x, %u\n", super.block_log2, super.block_log2);
+		fprintf(stdout, "    inodes        : 0x%08x, %u\n", super.inodes, super.inodes);
+		fprintf(stdout, "    root          : 0x%08x, %u\n", super.root, super.root);
+		fprintf(stdout, "    inodes_offset : 0x%08x, %u\n", super.inodes_offset, super.inodes_offset);
+		fprintf(stdout, "    inodes_size   : 0x%08x, %u\n", super.inodes_size, super.inodes_size);
+		fprintf(stdout, "    entries_offset: 0x%08x, %u\n", super.entries_offset, super.entries_offset);
+		fprintf(stdout, "    entries_size  : 0x%08x, %u\n", super.entries_size, super.entries_size);
 		fprintf(stdout, "    bits:\n");
 		fprintf(stdout, "      min:\n");
 		fprintf(stdout, "        ctime : 0x%08x, %u\n", super.min.inode.ctime, super.min.inode.ctime);
@@ -496,6 +509,7 @@ static int output_write (void)
 	buffer_uninit(&super_buffer);
 	buffer_uninit(&inode_buffer);
 	buffer_uninit(&entry_buffer);
+
 	return 0;
 }
 

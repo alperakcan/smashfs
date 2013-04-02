@@ -3,8 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <zlib.h>
-
 #include "buffer.h"
 
 int buffer_init (struct buffer *buffer)
