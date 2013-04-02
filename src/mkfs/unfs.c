@@ -274,7 +274,7 @@ static void traverse (long long inode, const char *name, long long level)
 			return;
 		}
 	} else {
-		fprintf(stderr, "unknown type: %d\n", node.type);
+		fprintf(stderr, "unknown type: %lld\n", node.type);
 		return;
 	}
 	chmod((char *) name, mode);

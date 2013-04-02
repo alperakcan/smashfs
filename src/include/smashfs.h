@@ -36,6 +36,7 @@
 enum smashfs_compression_type {
 	smashfs_compression_type_none		= 0x00,
 	smashfs_compression_type_gzip		= 0x01,
+	smashfs_compression_type_lzma		= 0x02,
 };
 
 enum smashfs_inode_type {

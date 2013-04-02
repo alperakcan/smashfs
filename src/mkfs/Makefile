@@ -9,10 +9,12 @@ mkfs.smashfs_files-y = \
 	bitbuffer.c \
 	compressor.c \
 	compressor-none.c \
-	compressor-gzip.c
+	compressor-gzip.c \
+	compressor-lzma.c
 
 mkfs.smashfs_ldflags-y = \
-	-lz
+	-lz \
+	-llzma
 
 mkfs.smashfs_cflags-y = \
 	-U_FILE_OFFSET_BITS
@@ -23,12 +25,14 @@ unfs.smashfs_files-y = \
 	bitbuffer.c \
 	compressor.c \
 	compressor-none.c \
-	compressor-gzip.c
+	compressor-gzip.c \
+	compressor-lzma.c
 
 unfs.smashfs_cflags-y = \
 	-U_FILE_OFFSET_BITS
 
 unfs.smashfs_ldflags-y = \
-	-lz
+	-lz \
+	-llzma
 
 include ../../Makefile.lib

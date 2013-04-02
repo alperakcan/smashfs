@@ -29,53 +29,60 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <zlib.h>
+#include <lzma.h>
 
-int gzip_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+#define LZMA_PROPS_SIZE		5
+#define LZMA_UNCOMP_SIZE	8
+#define LZMA_HEADER_SIZE	(LZMA_PROPS_SIZE + LZMA_UNCOMP_SIZE)
+
+#define LZMA_OPTIONS		9
+#define MEMLIMIT		(32 * 1024 * 1024)
+
+int lzma_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
-	int rc;
-	uLong zlen;
-	z_stream stream;
-	zlen = compressBound(ssize);
-	if (zlen > dsize) {
+	unsigned char *d = (unsigned char *) dst;
+	lzma_options_lzma opt;
+	lzma_stream strm = LZMA_STREAM_INIT;
+	int res;
+	if (ssize + LZMA_HEADER_SIZE > dsize) {
 		fprintf(stderr, "not enough space\n");
-		return -1;
+		goto bail;
 	}
-	stream.next_in = (Bytef *) src;
-	stream.avail_in = (uInt) ssize;
-	stream.next_out = dst;
-	stream.avail_out = (uInt) zlen;
-	if ((uLong) stream.avail_out != zlen) {
-		fprintf(stderr, "avail out and zlen is different\n");
-		return -1;
+	lzma_lzma_preset(&opt, LZMA_OPTIONS);
+	opt.dict_size = ssize;
+	res = lzma_alone_encoder(&strm, &opt);
+	if(res != LZMA_OK) {
+		fprintf(stderr, "lzma_alone_encoder failed\n");
+		lzma_end(&strm);
+		goto bail;
 	}
-	stream.zalloc = (alloc_func) 0;
-	stream.zfree = (free_func) 0;
-	stream.opaque = (voidpf) 0;
-	rc = deflateInit2(&stream, 9, Z_DEFLATED, -MAX_WBITS, 9, Z_DEFAULT_STRATEGY);
-	if (rc != Z_OK) {
-		fprintf(stderr, "deflateinit2 failed\n");
-		return -1;
+	strm.next_out = dst;
+	strm.avail_out = dsize;
+	strm.next_in = src;
+	strm.avail_in = ssize;
+	res = lzma_code(&strm, LZMA_FINISH);
+	lzma_end(&strm);
+	if(res != LZMA_STREAM_END) {
+		fprintf(stderr, "lzma_code failed\n");
+		goto bail;
 	}
-	rc = deflate(&stream, Z_FINISH);
-	if (rc != Z_STREAM_END) {
-		fprintf(stderr, "deflate failed\n");
-		return -1;
-	}
-	zlen = stream.total_out;
-	rc = deflateEnd(&stream);
-	if (rc != Z_OK) {
-		fprintf(stderr, "deflateEnd failed\n");
-		return -1;
-	}
-	return zlen;
+	d[LZMA_PROPS_SIZE] = ssize & 255;
+	d[LZMA_PROPS_SIZE + 1] = (ssize >> 8) & 255;
+	d[LZMA_PROPS_SIZE + 2] = (ssize >> 16) & 255;
+	d[LZMA_PROPS_SIZE + 3] = (ssize >> 24) & 255;
+	d[LZMA_PROPS_SIZE + 4] = 0;
+	d[LZMA_PROPS_SIZE + 5] = 0;
+	d[LZMA_PROPS_SIZE + 6] = 0;
+	d[LZMA_PROPS_SIZE + 7] = 0;
+	return (int) strm.total_out;
+bail:	return -1;
 }
 
-int gzip_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+int lzma_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
 	if (dsize < ssize) {
 		return -1;
 	}
 	memcpy(dst, src, ssize);
-	return dsize;
+	return ssize;
 }
