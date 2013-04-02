@@ -73,7 +73,7 @@ void bitbuffer_uninit (struct bitbuffer *bitbuffer)
 	if (bitbuffer->external == 0) {
 		free(bitbuffer->buffer);
 	}
-	(void) bitbuffer;
+	bitbuffer_init_from_buffer(bitbuffer, NULL, 0);
 }
 
 void * bitbuffer_buffer (struct bitbuffer *bitbuffer)

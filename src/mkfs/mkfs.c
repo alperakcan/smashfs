@@ -227,6 +227,16 @@ static int output_write (void)
 	struct buffer entry_cbuffer;
 	struct bitbuffer bitbuffer;
 
+	fd = -1;
+	bc = NULL;
+	blocks = NULL;
+	buffer_init(&inode_buffer);
+	buffer_init(&block_buffer);
+	buffer_init(&entry_buffer);
+	buffer_init(&super_buffer);
+	buffer_init(&entry_cbuffer);
+	bitbuffer_init_from_buffer(&bitbuffer, NULL, 0);
+
 	fprintf(stdout, "writing file: %s\n", output);
 
 	fprintf(stdout, "  calculating super max/min bits (1/3)\n");
@@ -322,8 +332,7 @@ static int output_write (void)
 			rc = buffer_add(&entry_buffer, node->regular_file->content, node->regular_file->size);
 			if (rc < 0) {
 				fprintf(stdout, "buffer add failed\n");
-				buffer_uninit(&entry_buffer);
-				return -1;
+				goto bail;
 			}
 			node->size = rc;
 			index = offset & ((1 << super.block_log2) - 1);
@@ -339,17 +348,14 @@ static int output_write (void)
 			rc = bitbuffer_init(&bitbuffer, size);
 			if (rc != 0) {
 				fprintf(stderr, "bitbuffer init failed\n");
-				buffer_uninit(&entry_buffer);
-				return -1;
+				goto bail;
 			}
 			bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.parent  , node->directory->parent);
 			bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.nentries, node->directory->nentries);
 			rc = buffer_add(&entry_buffer, bitbuffer_buffer(&bitbuffer), size);
 			if (rc < 0) {
 				fprintf(stdout, "buffer add failed\n");
-				bitbuffer_uninit(&bitbuffer);
-				buffer_uninit(&entry_buffer);
-				return -1;
+				goto bail;
 			}
 			node->size = rc;
 			bitbuffer_uninit(&bitbuffer);
@@ -361,24 +367,19 @@ static int output_write (void)
 				rc = bitbuffer_init(&bitbuffer, size);
 				if (rc != 0) {
 					fprintf(stderr, "bitbuffer init failed\n");
-					buffer_uninit(&entry_buffer);
-					return -1;
+					goto bail;
 				}
 				bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.entries.number, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->number);
 				rc = buffer_add(&entry_buffer, bitbuffer_buffer(&bitbuffer), size);
 				if (rc < 0) {
 					fprintf(stdout, "buffer add failed\n");
-					bitbuffer_uninit(&bitbuffer);
-					buffer_uninit(&entry_buffer);
-					return -1;
+					goto bail;
 				}
 				node->size += rc;
 				rc = buffer_add(&entry_buffer, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name, strlen(((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->name) + 1);
 				if (rc < 0) {
 					fprintf(stdout, "buffer add failed\n");
-					bitbuffer_uninit(&bitbuffer);
-					buffer_uninit(&entry_buffer);
-					return -1;
+					goto bail;
 				}
 				node->size += rc;
 				bitbuffer_uninit(&bitbuffer);
@@ -393,8 +394,7 @@ static int output_write (void)
 			rc = buffer_add(&entry_buffer, node->symbolic_link->path, strlen(node->symbolic_link->path) + 1);
 			if (rc < 0) {
 				fprintf(stdout, "buffer add failed\n");
-				buffer_uninit(&entry_buffer);
-				return -1;
+				goto bail;
 			}
 			node->size = rc;
 			index = offset & ((1 << super.block_log2) - 1);
@@ -431,15 +431,12 @@ static int output_write (void)
 	blocks = malloc(super.blocks * sizeof(struct block));
 	if (blocks == NULL) {
 		fprintf(stderr, "malloc failed\n");
-		buffer_uninit(&entry_buffer);
-		return -1;
+		goto bail;
 	}
 	bc = malloc(super.block_size * 2);
 	if (bc == NULL) {
 		fprintf(stderr, "malloc failed\n");
-		free(blocks);
-		buffer_uninit(&entry_buffer);
-		return -1;
+		goto bail;
 	}
 	buffer_init(&entry_cbuffer);
 	bb = buffer_buffer(&entry_buffer);
@@ -453,20 +450,12 @@ static int output_write (void)
 		rc = compressor_compress(compressor, bb, blocks[b].size, bc, super.block_size * 2);
 		if (rc < 0) {
 			fprintf(stderr, "compress failed\n");
-			free(bc);
-			free(blocks);
-			buffer_uninit(&entry_cbuffer);
-			buffer_uninit(&entry_buffer);
-			return -1;
+			goto bail;
 		}
 		blocks[b].compressed_size = rc;
 		if (buffer_add(&entry_cbuffer, bc, rc) != rc) {
 			fprintf(stderr, "buffer add failed\n");
-			free(bc);
-			free(blocks);
-			buffer_uninit(&entry_cbuffer);
-			buffer_uninit(&entry_buffer);
-			return -1;
+			goto bail;
 		}
 		bb += super.block_size;
 		max_block_offset += rc;
@@ -498,33 +487,20 @@ static int output_write (void)
 	rc = bitbuffer_init(&bitbuffer, size);
 	if (rc != 0) {
 		fprintf(stderr, "bitbuffer init failed\n");
-		free(bc);
-		free(blocks);
-		buffer_uninit(&entry_cbuffer);
-		buffer_uninit(&entry_buffer);
-		return -1;
+		goto bail;
 	}
 	for (b = 0; b < super.blocks; b++) {
 		bitbuffer_putbits(&bitbuffer, super.bits.block.offset, blocks[b].offset);
 		bitbuffer_putbits(&bitbuffer, super.bits.block.size, blocks[b].size);
 		bitbuffer_putbits(&bitbuffer, super.bits.block.compressed_size, blocks[b].compressed_size);
 	}
-
 	buffer_init(&block_buffer);
 	rc = buffer_add(&block_buffer, bitbuffer_buffer(&bitbuffer), size);
 	if (rc < 0) {
 		fprintf(stdout, "buffer add failed\n");
-		free(bc);
-		free(blocks);
-		bitbuffer_uninit(&bitbuffer);
-		buffer_uninit(&entry_cbuffer);
-		buffer_uninit(&entry_buffer);
-		return -1;
+		goto bail;
 	}
-
 	bitbuffer_uninit(&bitbuffer);
-	free(blocks);
-	free(bc);
 
 	fprintf(stdout, "  calculating inode size\n");
 
@@ -548,15 +524,10 @@ static int output_write (void)
 
 	fprintf(stdout, "  filling inodes table\n");
 
-	buffer_init(&inode_buffer);
 	rc = bitbuffer_init(&bitbuffer, size);
 	if (rc != 0) {
 		fprintf(stderr, "bitbuffer init failed\n");
-		buffer_uninit(&inode_buffer);
-		buffer_uninit(&block_buffer);
-		buffer_uninit(&entry_buffer);
-		buffer_uninit(&entry_cbuffer);
-		return -1;
+		goto bail;
 	}
 	HASH_ITER(hh, nodes_table, node, nnode) {
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.type      , node->type);
@@ -577,12 +548,7 @@ static int output_write (void)
 	rc = buffer_add(&inode_buffer, bitbuffer_buffer(&bitbuffer), size);
 	if (rc < 0) {
 		fprintf(stdout, "buffer add failed\n");
-		bitbuffer_uninit(&bitbuffer);
-		buffer_uninit(&inode_buffer);
-		buffer_uninit(&block_buffer);
-		buffer_uninit(&entry_buffer);
-		buffer_uninit(&entry_cbuffer);
-		return -1;
+		goto bail;
 	}
 	bitbuffer_uninit(&bitbuffer);
 
@@ -646,12 +612,7 @@ static int output_write (void)
 	rc = buffer_add(&super_buffer, &super, sizeof(struct smashfs_super_block));
 	if (rc < 0) {
 		fprintf(stderr, "buffer add failed for super block\n");
-		buffer_uninit(&super_buffer);
-		buffer_uninit(&block_buffer);
-		buffer_uninit(&inode_buffer);
-		buffer_uninit(&entry_buffer);
-		buffer_uninit(&entry_cbuffer);
-		return -1;
+		goto bail;
 	}
 
 	fprintf(stdout, "  buffers:\n");
@@ -665,79 +626,54 @@ static int output_write (void)
 	fd = open(output, O_CREAT | O_TRUNC | O_WRONLY, 0666);
 	if (fd < 0) {
 		fprintf(stderr, "open failed for %s\n", output);
-		free(bc);
-		buffer_uninit(&entry_cbuffer);
-		buffer_uninit(&super_buffer);
-		buffer_uninit(&block_buffer);
-		buffer_uninit(&inode_buffer);
-		buffer_uninit(&entry_buffer);
-		return -1;
+		goto bail;
 	}
 
 	rc = write(fd, buffer_buffer(&super_buffer), buffer_length(&super_buffer));
 	if (rc != buffer_length(&super_buffer)) {
 		fprintf(stderr, "write failed\n");
-		close(fd);
-		unlink(output);
-		free(bc);
-		buffer_uninit(&entry_cbuffer);
-		buffer_uninit(&super_buffer);
-		buffer_uninit(&block_buffer);
-		buffer_uninit(&inode_buffer);
-		buffer_uninit(&entry_buffer);
-		return -1;
+		goto bail;
 	}
 
 	rc = write(fd, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
 	if (rc != buffer_length(&inode_buffer)) {
 		fprintf(stderr, "write failed\n");
-		close(fd);
-		unlink(output);
-		free(bc);
-		buffer_uninit(&entry_cbuffer);
-		buffer_uninit(&super_buffer);
-		buffer_uninit(&block_buffer);
-		buffer_uninit(&inode_buffer);
-		buffer_uninit(&entry_buffer);
-		return -1;
+		goto bail;
 	}
 
 	rc = write(fd, buffer_buffer(&block_buffer), buffer_length(&block_buffer));
 	if (rc != buffer_length(&block_buffer)) {
 		fprintf(stderr, "write failed\n");
-		close(fd);
-		unlink(output);
-		free(bc);
-		buffer_uninit(&entry_cbuffer);
-		buffer_uninit(&super_buffer);
-		buffer_uninit(&block_buffer);
-		buffer_uninit(&inode_buffer);
-		buffer_uninit(&entry_buffer);
-		return -1;
+		goto bail;
 	}
 
 	rc = write(fd, buffer_buffer(&entry_cbuffer), buffer_length(&entry_cbuffer));
 	if (rc != buffer_length(&entry_cbuffer)) {
 		fprintf(stderr, "write failed\n");
-		close(fd);
-		unlink(output);
-		free(bc);
-		buffer_uninit(&entry_cbuffer);
-		buffer_uninit(&super_buffer);
-		buffer_uninit(&block_buffer);
-		buffer_uninit(&inode_buffer);
-		buffer_uninit(&entry_buffer);
-		return -1;
+		goto bail;
 	}
 
 	close(fd);
+	free(bc);
+	free(blocks);
 	buffer_uninit(&entry_cbuffer);
 	buffer_uninit(&super_buffer);
 	buffer_uninit(&inode_buffer);
 	buffer_uninit(&block_buffer);
 	buffer_uninit(&entry_buffer);
-
 	return 0;
+
+bail:
+	close(fd);
+	free(bc);
+	free(blocks);
+	bitbuffer_uninit(&bitbuffer);
+	buffer_uninit(&entry_cbuffer);
+	buffer_uninit(&super_buffer);
+	buffer_uninit(&inode_buffer);
+	buffer_uninit(&block_buffer);
+	buffer_uninit(&entry_buffer);
+	return -1;
 }
 
 static int node_delete (struct node *node)
