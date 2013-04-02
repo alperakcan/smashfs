@@ -93,6 +93,24 @@ static void traverse (long long inode, const char *name, long long level)
 	size       = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.size);
 	block      = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.block);
 	index      = bitbuffer_getbits(&inode_bitbuffer, super.bits.inode.index);
+	if (super.bits.inode.group_mode == 0) {
+		group_mode = owner_mode;
+	}
+	if (super.bits.inode.other_mode == 0) {
+		other_mode = owner_mode;
+	}
+	if (super.bits.inode.uid == 0) {
+		uid = 0;
+	}
+	if (super.bits.inode.gid == 0) {
+		gid = 0;
+	}
+	if (super.bits.inode.ctime == 0) {
+		ctime = super.ctime;
+	}
+	if (super.bits.inode.mtime == 0) {
+		mtime = ctime;
+	}
 	if (debug > 1) {
 		fprintf(stdout, "  ");
 		for (l = 0; l < level; l++) {
@@ -176,6 +194,7 @@ static void traverse (long long inode, const char *name, long long level)
 			return;
 		}
 		chmod((char *) name, mode);
+		chown((char *) name, uid, gid);
 	} else if (type == smashfs_inode_type_regular_file) {
 		if (debug > 1) {
 			fprintf(stdout, "]\n");
@@ -195,6 +214,7 @@ static void traverse (long long inode, const char *name, long long level)
 		}
 		close(fd);
 		chmod((char *) name, mode);
+		chown((char *) name, uid, gid);
 	} else if (type == smashfs_inode_type_symbolic_link) {
 		if (debug > 1) {
 			fprintf(stdout, ", path: %s]\n", buffer);
@@ -206,6 +226,7 @@ static void traverse (long long inode, const char *name, long long level)
 			return;
 		}
 		chmod((char *) name, mode);
+		chown((char *) name, uid, gid);
 	}
 }
 
