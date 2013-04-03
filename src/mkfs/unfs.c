@@ -143,17 +143,6 @@ static int block_fill (long long number, struct block *block)
 	return 0;
 }
 
-static int block_read (long long offset, long long size, void *dst, unsigned int dsize)
-{
-	int rc;
-	rc = compressor_uncompress(compressor, buffer_buffer(&entry_buffer) + offset, size, dst, dsize);
-	if (rc < 0) {
-		fprintf(stderr, "compressor uncompress failed\n");
-		return -1;
-	}
-	return 0;
-}
-
 static int node_read (struct node *node, int (*function) (void *context, void *buffer, long long size), void *context)
 {
 	int rc;
@@ -177,8 +166,8 @@ static int node_read (struct node *node, int (*function) (void *context, void *b
 			free(bbuffer);
 			return -1;
 		}
-		rc = block_read(block.offset, block.compressed_size, bbuffer, block.size);
-		if (rc != 0) {
+		rc = compressor_uncompress(compressor, buffer_buffer(&entry_buffer) + block.offset, block.compressed_size, bbuffer, block.size);
+		if (rc < 0) {
 			fprintf(stderr, "block read failed\n");
 			free(bbuffer);
 			return -1;
