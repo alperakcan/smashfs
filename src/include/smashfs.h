@@ -32,6 +32,7 @@
 #define SMASHFS_VERSION_0			SMASHFS_MKTAG('V', '0', '0', '0')
 
 #define SMASHFS_START				0
+#define SMASHFS_NAME_LEN			256
 
 enum smashfs_compression_type {
 	smashfs_compression_type_none		= 0x00,
