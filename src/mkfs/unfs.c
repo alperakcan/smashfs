@@ -525,8 +525,11 @@ int main (int argc, char *argv[])
 		fprintf(stdout, "    entries_size  : 0x%08x, %u\n", super.entries_size, super.entries_size);
 		fprintf(stdout, "    bits:\n");
 		fprintf(stdout, "      min:\n");
-		fprintf(stdout, "        ctime : 0x%08x, %u\n", super.min.inode.ctime, super.min.inode.ctime);
-		fprintf(stdout, "        mtime : 0x%08x, %u\n", super.min.inode.mtime, super.min.inode.mtime);
+		fprintf(stdout, "        inode:\n");
+		fprintf(stdout, "          ctime : 0x%08x, %u\n", super.min.inode.ctime, super.min.inode.ctime);
+		fprintf(stdout, "          mtime : 0x%08x, %u\n", super.min.inode.mtime, super.min.inode.mtime);
+		fprintf(stdout, "        block:\n");
+		fprintf(stdout, "          compressed_size : 0x%08x, %u\n", super.min.block.compressed_size, super.min.block.compressed_size);
 		fprintf(stdout, "      inode:\n");
 		fprintf(stdout, "        type      : %u\n", super.bits.inode.type);
 		fprintf(stdout, "        owner_mode: %u\n", super.bits.inode.owner_mode);
@@ -548,8 +551,8 @@ int main (int argc, char *argv[])
 		fprintf(stdout, "        symbolic_link:\n");
 		fprintf(stdout, "      block:\n");
 		fprintf(stdout, "        offset         : %u\n", super.bits.block.offset);
-		fprintf(stdout, "        size           : %u\n", super.bits.block.size);
 		fprintf(stdout, "        compressed_size: %u\n", super.bits.block.compressed_size);
+		fprintf(stdout, "        size           : %u\n", super.bits.block.size);
 	}
 	fprintf(stdout, "creating compressor\n");
 	compressor = compressor_create_type(super.compression_type);
