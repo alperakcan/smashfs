@@ -426,7 +426,7 @@ static int output_write (void)
 	super.bits.inode.block = blog(max_inode_block);
 	super.bits.inode.index = blog(max_inode_index);
 
-	fprintf(stdout, "  compressing %d blocks:\n", super.blocks);
+	fprintf(stdout, "  compressing %d blocks\n", super.blocks);
 
 	blocks = malloc(super.blocks * sizeof(struct block));
 	if (blocks == NULL) {

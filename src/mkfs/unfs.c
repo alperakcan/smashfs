@@ -241,7 +241,10 @@ static void traverse (long long inode, const char *name, long long level)
 		nbuffer = malloc(node.size);
 		if (nbuffer == NULL) {
 			fprintf(stderr, "malloc failed\n");
-			chdir("..");
+			rc = chdir("..");
+			if (rc != 0) {
+				fprintf(stderr, "chdir failed\n");
+			}
 			return;
 		}
 		while (s < node.size) {
@@ -249,7 +252,10 @@ static void traverse (long long inode, const char *name, long long level)
 			if (rc != 0) {
 				fprintf(stderr, "block fill failed\n");
 				free(nbuffer);
-				chdir("..");
+				rc = chdir("..");
+				if (rc != 0) {
+					fprintf(stderr, "chdir failed\n");
+				}
 				return;
 			}
 			bbuffer = malloc(block.size);
@@ -257,7 +263,10 @@ static void traverse (long long inode, const char *name, long long level)
 				fprintf(stderr, "malloc failed\n");
 				free(bbuffer);
 				free(nbuffer);
-				chdir("..");
+				rc = chdir("..");
+				if (rc != 0) {
+					fprintf(stderr, "chdir failed\n");
+				}
 				return;
 			}
 			rc = block_read(block.offset, block.compressed_size, bbuffer, block.size);
@@ -265,12 +274,15 @@ static void traverse (long long inode, const char *name, long long level)
 				fprintf(stderr, "block read failed\n");
 				free(bbuffer);
 				free(nbuffer);
-				chdir("..");
+				rc = chdir("..");
+				if (rc != 0) {
+					fprintf(stderr, "chdir failed\n");
+				}
 				return;
 			}
 			memcpy(nbuffer + s, bbuffer + i, MIN(node.size - s, block.size - i));
 			free(bbuffer);
-			s += block.size;
+			s += MIN(node.size - s, block.size - i);
 			b += 1;
 			i = 0;
 		}
@@ -349,7 +361,7 @@ static void traverse (long long inode, const char *name, long long level)
 				return;
 			}
 			free(bbuffer);
-			s += block.size;
+			s += MIN(node.size - s, block.size - i);
 			b += 1;
 			i = 0;
 		}
@@ -365,7 +377,6 @@ static void traverse (long long inode, const char *name, long long level)
 		nbuffer = malloc(node.size);
 		if (nbuffer == NULL) {
 			fprintf(stderr, "malloc failed\n");
-			chdir("..");
 			return;
 		}
 		while (s < node.size) {
@@ -373,14 +384,12 @@ static void traverse (long long inode, const char *name, long long level)
 			if (rc != 0) {
 				fprintf(stderr, "block fill failed\n");
 				free(nbuffer);
-				chdir("..");
 				return;
 			}
 			bbuffer = malloc(block.size);
 			if (bbuffer == NULL) {
 				fprintf(stderr, "malloc failed\n");
 				free(nbuffer);
-				chdir("..");
 				return;
 			}
 			rc = block_read(block.offset, block.compressed_size, bbuffer, block.size);
@@ -388,12 +397,11 @@ static void traverse (long long inode, const char *name, long long level)
 				fprintf(stderr, "block read failed\n");
 				free(bbuffer);
 				free(nbuffer);
-				chdir("..");
 				return;
 			}
 			memcpy(nbuffer + s, bbuffer + i, MIN(node.size - s, block.size - i));
 			free(bbuffer);
-			s += block.size;
+			s += MIN(node.size - s, block.size - i);
 			b += 1;
 			i = 0;
 		}
