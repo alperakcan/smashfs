@@ -235,6 +235,7 @@ static int output_write (void)
 	long long max_block_offset;
 	long long max_block_size;
 	long long max_block_compressed_size;
+	long long min_block_compressed_size;
 
 	struct buffer inode_buffer;
 	struct buffer block_buffer;
@@ -482,23 +483,27 @@ static int output_write (void)
 	max_block_offset          = -1;
 	max_block_size            = -1;
 	max_block_compressed_size = -1;
+	min_block_compressed_size = LONG_LONG_MAX;
 	for (b = 0; b < super.blocks; b++) {
 		max_block_offset          = MAX(max_block_offset, blocks[b].offset);
-		max_block_size            = MAX(max_block_size, blocks[b].size);
 		max_block_compressed_size = MAX(max_block_compressed_size, blocks[b].compressed_size);
+		min_block_compressed_size = MIN(min_block_compressed_size, blocks[b].compressed_size);
 	}
+	max_block_size            = MAX(max_block_size, blocks[b - 1].size);
 
 	fprintf(stdout, "  setting super block (3/4)\n");
 
 	super.bits.block.offset          = blog(max_block_offset);
 	super.bits.block.size            = blog(max_block_size);
-	super.bits.block.compressed_size = blog(max_block_compressed_size);
+	super.bits.block.compressed_size = blog(max_block_compressed_size - min_block_compressed_size);
+	super.min.block.compressed_size  = min_block_compressed_size;
 
 	size  = 0;
 	size += super.bits.block.offset;
-	size += super.bits.block.size;
 	size += super.bits.block.compressed_size;
-	size = (super.blocks * size + 7) / 8;
+	size *= super.blocks;
+	size += super.bits.block.size;
+	size = (size + 7) / 8;
 
 	rc = bitbuffer_init(&bitbuffer, size);
 	if (rc != 0) {
@@ -507,9 +512,9 @@ static int output_write (void)
 	}
 	for (b = 0; b < super.blocks; b++) {
 		bitbuffer_putbits(&bitbuffer, super.bits.block.offset, blocks[b].offset);
-		bitbuffer_putbits(&bitbuffer, super.bits.block.size, blocks[b].size);
-		bitbuffer_putbits(&bitbuffer, super.bits.block.compressed_size, blocks[b].compressed_size);
+		bitbuffer_putbits(&bitbuffer, super.bits.block.compressed_size, blocks[b].compressed_size - min_block_compressed_size);
 	}
+	bitbuffer_putbits(&bitbuffer, super.bits.block.size, blocks[b - 1].size);
 	buffer_init(&block_buffer);
 	rc = buffer_add(&block_buffer, bitbuffer_buffer(&bitbuffer), size);
 	if (rc < 0) {
@@ -573,7 +578,7 @@ static int output_write (void)
 	super.inodes_offset  = sizeof(struct smashfs_super_block);
 	super.inodes_size    = buffer_length(&inode_buffer);
 	super.blocks_offset  = super.inodes_offset + super.inodes_size;
-	super.blocks_size     = buffer_length(&block_buffer);
+	super.blocks_size    = buffer_length(&block_buffer);
 	super.entries_offset = super.blocks_offset + super.blocks_size;
 	super.entries_size   = buffer_length(&entry_cbuffer);
 
@@ -597,8 +602,11 @@ static int output_write (void)
 		fprintf(stdout, "    entries_size  : 0x%08x, %u\n", super.entries_size, super.entries_size);
 		fprintf(stdout, "    bits:\n");
 		fprintf(stdout, "      min:\n");
-		fprintf(stdout, "        ctime : 0x%08x, %u\n", super.min.inode.ctime, super.min.inode.ctime);
-		fprintf(stdout, "        mtime : 0x%08x, %u\n", super.min.inode.mtime, super.min.inode.mtime);
+		fprintf(stdout, "        inode:\n");
+		fprintf(stdout, "          ctime : 0x%08x, %u\n", super.min.inode.ctime, super.min.inode.ctime);
+		fprintf(stdout, "          mtime : 0x%08x, %u\n", super.min.inode.mtime, super.min.inode.mtime);
+		fprintf(stdout, "        block:\n");
+		fprintf(stdout, "          compressed_size : 0x%08x, %u\n", super.min.block.compressed_size, super.min.block.compressed_size);
 		fprintf(stdout, "      inode:\n");
 		fprintf(stdout, "        type      : %u\n", super.bits.inode.type);
 		fprintf(stdout, "        owner_mode: %u\n", super.bits.inode.owner_mode);
@@ -620,8 +628,8 @@ static int output_write (void)
 		fprintf(stdout, "        symbolic_link:\n");
 		fprintf(stdout, "      block:\n");
 		fprintf(stdout, "        offset         : %u\n", super.bits.block.offset);
-		fprintf(stdout, "        size           : %u\n", super.bits.block.size);
 		fprintf(stdout, "        compressed_size: %u\n", super.bits.block.compressed_size);
+		fprintf(stdout, "        size           : %u\n", super.bits.block.size);
 	}
 
 	buffer_init(&super_buffer);

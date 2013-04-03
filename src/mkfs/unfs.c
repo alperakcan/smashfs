@@ -136,9 +136,9 @@ static int block_fill (long long number, struct block *block)
 		return -1;
 	}
 	bitbuffer_setpos(&bitbuffer, number * max_block_size);
-	block->offset  = bitbuffer_getbits(&bitbuffer, super.bits.block.offset);
-	block->size  = bitbuffer_getbits(&bitbuffer, super.bits.block.size);
-	block->compressed_size  = bitbuffer_getbits(&bitbuffer, super.bits.block.compressed_size);
+	block->offset           = bitbuffer_getbits(&bitbuffer, super.bits.block.offset);
+	block->compressed_size  = bitbuffer_getbits(&bitbuffer, super.bits.block.compressed_size) + super.min.block.compressed_size;
+	block->size             = (number < super.blocks) ? super.block_size :bitbuffer_getbits(&bitbuffer, super.bits.block.size);
 	bitbuffer_uninit(&bitbuffer);
 	return 0;
 }
@@ -648,7 +648,6 @@ int main (int argc, char *argv[])
 	max_inode_size += super.bits.inode.index;
 	max_block_size  = 0;
 	max_block_size += super.bits.block.offset;
-	max_block_size += super.bits.block.size;
 	max_block_size += super.bits.block.compressed_size;
 	if (debug > 2) {
 		struct bitbuffer bitbuffer;

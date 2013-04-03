@@ -101,8 +101,8 @@ struct smashfs_super_block {
 		} inode;
 		struct {
 			uint32_t offset;
-			uint32_t size;
 			uint32_t compressed_size;
+			uint32_t size;
 		} block;
 	} bits;
 	struct {
@@ -110,5 +110,8 @@ struct smashfs_super_block {
 			uint32_t ctime;
 			uint32_t mtime;
 		} inode;
+		struct {
+			uint32_t compressed_size;
+		} block;
 	} min;
 } __attribute__((packed));
