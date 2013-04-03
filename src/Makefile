@@ -3,7 +3,7 @@ subdir-y = \
 	mkfs
 
 ifeq ($(uname_S), Linux)
-subdir-n += \
+subdir-y += \
 	linux
 endif
 
