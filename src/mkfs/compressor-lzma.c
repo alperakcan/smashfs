@@ -112,6 +112,5 @@ int lzma_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsiz
 	if (res == LZMA_STREAM_END) {
 		return dsize;
 	}
-bail:
-	return -1;
+bail:	return -1;
 }
