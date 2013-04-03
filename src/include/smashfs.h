@@ -42,9 +42,9 @@ enum smashfs_compression_type {
 enum smashfs_inode_type {
 	smashfs_inode_type_regular_file		= 0x01,
 	smashfs_inode_type_directory		= 0x02,
-	smashfs_inode_type_character_device	= 0x03,
-	smashfs_inode_type_block_device		= 0x04,
-	smashfs_inode_type_symbolic_link	= 0x05,
+	smashfs_inode_type_symbolic_link	= 0x03,
+	smashfs_inode_type_character_device	= 0x04,
+	smashfs_inode_type_block_device		= 0x05,
 	smashfs_inode_type_fifo			= 0x06,
 	smashfs_inode_type_socket		= 0x07,
 };

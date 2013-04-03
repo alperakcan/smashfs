@@ -166,6 +166,22 @@ static int nodes_sort_by_number (struct node *a, struct node *b)
 
 static int nodes_sort_by_type (struct node *a, struct node *b)
 {
+#if 0
+	int abin;
+	int bbin;
+	if (a->type == smashfs_inode_type_regular_file &&
+	    b->type == smashfs_inode_type_regular_file) {
+		if (a->regular_file->size >= 4 &&
+		    b->regular_file->size >= 4) {
+			abin = (a->regular_file->content[0] == 0x7f) && (a->regular_file->content[1] == 0x45) && (a->regular_file->content[2] == 0x4c) && (a->regular_file->content[3] == 0x46);
+			bbin = (b->regular_file->content[0] == 0x7f) && (b->regular_file->content[1] == 0x45) && (b->regular_file->content[2] == 0x4c) && (b->regular_file->content[3] == 0x46);
+			if (abin == bbin) {
+				return 0;
+			}
+			return bbin - abin;
+		}
+	}
+#endif
 	if (a->type == b->type) {
 		return 0;
 	}

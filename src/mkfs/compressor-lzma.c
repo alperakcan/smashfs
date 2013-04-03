@@ -36,7 +36,7 @@
 #define LZMA_HEADER_SIZE	(LZMA_PROPS_SIZE + LZMA_UNCOMP_SIZE)
 
 #define LZMA_OPTIONS		6
-#define MEMLIMIT		(32 * 1024 * 1024)
+#define MEMLIMIT		(256 * 1024 * 1024)
 
 int lzma_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
