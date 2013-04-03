@@ -8,6 +8,7 @@ obj-m := ${MOD_NAME}.o
 
 ${MOD_NAME}-objs  = fs.o
 ${MOD_NAME}-objs += super.o
+${MOD_NAME}-objs += bitbuffer.o
 
 cflags-y  = -I${SUBDIRS}/../include
 

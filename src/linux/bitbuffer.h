@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Alper Akcan <alper.akcan@gmail.com>.
+ * Copyright (c) 2011-2013, Alper Akcan <alper.akcan@gmail.com>.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,19 +27,37 @@
  * either expressed or implied, of the FreeBSD Project.
  */
 
-struct smashfs_super_info {
-	int devblksize;
-	int devblksize_log2;
-	int block_size;
-	int block_log2;
-	int inodes;
-	int bytes_used;
-	long long max_inode_size;
-	struct smashfs_super_block *super;
-	unsigned char *inodes_table;
-	long long inodes_size;
-	unsigned char *blocks_table;
-	long long blocks_size;
+#define BITBUFFER_INITIALIZER { \
+	.buffer = NULL, \
+	.end = NULL, \
+	.size = 0, \
+	.bsize = 0, \
+	.index = 0, \
+	.external = 0, \
+}
+
+struct bitbuffer {
+	unsigned char *buffer;
+	unsigned char *end;
+	int size;
+	int bsize;
+	int index;
+	int external;
 };
 
-int smashfs_fill_super (struct super_block *sb, void *data, int silent);
+int bitbuffer_init (struct bitbuffer *bitbuffer, int size);
+int bitbuffer_init_from_buffer (struct bitbuffer *bitbuffer, unsigned char *buffer, int size);
+void bitbuffer_uninit (struct bitbuffer *bitbuffer);
+void * bitbuffer_buffer (struct bitbuffer *bitbuffer);
+unsigned int bitbuffer_getlength (struct bitbuffer *bitbuffer);
+unsigned int bitbuffer_getbitlength (struct bitbuffer *bitbuffer);
+unsigned int bitbuffer_getpos (struct bitbuffer *bitbuffer);
+unsigned int bitbuffer_setpos (struct bitbuffer *bitbuffer, unsigned int pos);
+void bitbuffer_putbit (struct bitbuffer *bitbuffer, unsigned int value);
+void bitbuffer_putbits (struct bitbuffer *bitbuffer, int n, unsigned int value);
+unsigned int bitbuffer_getbit (struct bitbuffer *bitbuffer);
+unsigned int bitbuffer_getbits (struct bitbuffer *bitbuffer, int n);
+unsigned int bitbuffer_getbuffer (struct bitbuffer *bitbuffer, char *buffer, int n);
+unsigned int bitbuffer_skipbits (struct bitbuffer *bitbuffer, int n);
+unsigned int bitbuffer_showbits (struct bitbuffer *bitbuffer, int n);
+unsigned int bitbuffer_copybits (struct bitbuffer *pbitbuffer, struct bitbuffer *gbitbuffer, int n);
