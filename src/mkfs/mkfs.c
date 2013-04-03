@@ -559,7 +559,7 @@ static int output_write (void)
 	super.blocks_offset  = super.inodes_offset + super.inodes_size;
 	super.blocks_size     = buffer_length(&block_buffer);
 	super.entries_offset = super.blocks_offset + super.blocks_size;
-	super.entries_size   = buffer_length(&entry_buffer);
+	super.entries_size   = buffer_length(&entry_cbuffer);
 
 	fprintf(stdout, "  filling super block\n");
 

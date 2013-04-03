@@ -43,10 +43,15 @@
 #include "uthash.h"
 #include "buffer.h"
 #include "bitbuffer.h"
+#include "compressor.h"
+
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
 
 static int debug			= 0;
 static char *source			= NULL;
 static char *output			= NULL;
+static struct compressor *compressor	= NULL;
 
 struct buffer inode_buffer		= BUFFER_INITIALIZER;
 struct buffer block_buffer		= BUFFER_INITIALIZER;
@@ -77,7 +82,7 @@ struct block {
 	long long compressed_size;
 };
 
-static int node_read (long long number, struct node *node)
+static int node_fill (long long number, struct node *node)
 {
 	int rc;
 	struct bitbuffer bitbuffer;
@@ -121,7 +126,7 @@ static int node_read (long long number, struct node *node)
 	return 0;
 }
 
-static int block_read (long long number, struct block *block)
+static int block_fill (long long number, struct block *block)
 {
 	int rc;
 	struct bitbuffer bitbuffer;
@@ -138,6 +143,17 @@ static int block_read (long long number, struct block *block)
 	return 0;
 }
 
+static int block_read (long long offset, long long size, void *dst, unsigned int dsize)
+{
+	int rc;
+	rc = compressor_uncompress(compressor, buffer_buffer(&entry_buffer) + offset, size, dst, dsize);
+	if (rc < 0) {
+		fprintf(stderr, "compressor uncompress failed\n");
+		return -1;
+	}
+	return 0;
+}
+
 static void traverse (long long inode, const char *name, long long level)
 {
 	int rc;
@@ -146,21 +162,25 @@ static void traverse (long long inode, const char *name, long long level)
 	long long e;
 	long long l;
 	long long s;
-	struct node node;
-	struct block block;
+	long long b;
+	long long i;
 	long long directory_parent;
 	long long directory_nentries;
 	long long directory_entry_number;
 	unsigned char *buffer;
+	unsigned char *bbuffer;
+	unsigned char *nbuffer;
+	struct node node;
+	struct block block;
 	struct bitbuffer bitbuffer;
-	rc = node_read(inode, &node);
+	rc = node_fill(inode, &node);
 	if (rc != 0) {
-		fprintf(stderr, "node read failed\n");
+		fprintf(stderr, "node fill failed\n");
 		return;
 	}
-	rc = block_read(node.block, &block);
+	rc = block_fill(node.block, &block);
 	if (rc != 0) {
-		fprintf(stderr, "block read failed\n");
+		fprintf(stderr, "block fill failed\n");
 		return;
 	}
 	if (debug > 1) {
@@ -204,9 +224,6 @@ static void traverse (long long inode, const char *name, long long level)
 	if (node.other_mode & smashfs_inode_mode_execute) {
 		mode |= S_IXOTH;
 	}
-	buffer  = buffer_buffer(&entry_buffer);
-	buffer += block.offset;
-	buffer += node.index;
 	if (node.type == smashfs_inode_type_directory) {
 		rc = mkdir(name, mode);
 		if (rc != 0 && errno != EEXIST) {
@@ -218,6 +235,44 @@ static void traverse (long long inode, const char *name, long long level)
 			fprintf(stderr, "chdir failed\n");
 			return;
 		}
+		s = 0;
+		i = node.index;
+		b = node.block;
+		nbuffer = malloc(node.size);
+		if (nbuffer == NULL) {
+			fprintf(stderr, "malloc failed\n");
+			chdir("..");
+			return;
+		}
+		while (s < node.size) {
+			rc = block_fill(b, &block);
+			if (rc != 0) {
+				fprintf(stderr, "block fill failed\n");
+				free(nbuffer);
+				chdir("..");
+				return;
+			}
+			bbuffer = malloc(block.size);
+			if (bbuffer == NULL) {
+				fprintf(stderr, "malloc failed\n");
+				free(nbuffer);
+				chdir("..");
+				return;
+			}
+			rc = block_read(block.offset, block.compressed_size, bbuffer, block.size);
+			if (rc != 0) {
+				fprintf(stderr, "block read failed\n");
+				free(nbuffer);
+				chdir("..");
+				return;
+			}
+			memcpy(nbuffer + s, bbuffer + i, MIN(node.size - s, block.size - i));
+			free(bbuffer);
+			s += block.size;
+			b += 1;
+			i = 0;
+		}
+		buffer = nbuffer;
 		bitbuffer_init_from_buffer(&bitbuffer, buffer, node.size);
 		directory_parent   = bitbuffer_getbits(&bitbuffer, super.bits.inode.directory.parent);
 		directory_nentries = bitbuffer_getbits(&bitbuffer, super.bits.inode.directory.nentries);
@@ -243,8 +298,10 @@ static void traverse (long long inode, const char *name, long long level)
 		rc = chdir("..");
 		if (rc != 0) {
 			fprintf(stderr, "chdir failed\n");
+			free(nbuffer);
 			return;
 		}
+		free(nbuffer);
 	} else if (node.type == smashfs_inode_type_regular_file) {
 		if (debug > 1) {
 			fprintf(stdout, "]\n");
@@ -255,12 +312,42 @@ static void traverse (long long inode, const char *name, long long level)
 			fprintf(stderr, "open failed\n");
 			return;
 		}
-		rc = write(fd, buffer, node.size);
-		if (rc != node.size) {
-			fprintf(stderr, "write failed\n");
-			close(fd);
-			unlink(name);
-			return;
+		s = 0;
+		i = node.index;
+		b = node.block;
+		while (s < node.size) {
+			rc = block_fill(b, &block);
+			if (rc != 0) {
+				fprintf(stderr, "block fill failed\n");
+				close(fd);
+				unlink(name);
+				return;
+			}
+			bbuffer = malloc(block.size);
+			if (bbuffer == NULL) {
+				fprintf(stderr, "malloc failed\n");
+				close(fd);
+				unlink(name);
+				return;
+			}
+			rc = block_read(block.offset, block.compressed_size, bbuffer, block.size);
+			if (rc != 0) {
+				fprintf(stderr, "block read failed\n");
+				close(fd);
+				unlink(name);
+				return;
+			}
+			rc = write(fd, bbuffer + i, MIN(node.size - s, block.size - i));
+			if (rc != MIN(node.size - s, block.size - i)) {
+				fprintf(stderr, "write failed, rc: %d\n", rc);
+				close(fd);
+				unlink(name);
+				return;
+			}
+			free(bbuffer);
+			s += block.size;
+			b += 1;
+			i = 0;
 		}
 		close(fd);
 	} else if (node.type == smashfs_inode_type_symbolic_link) {
@@ -268,11 +355,51 @@ static void traverse (long long inode, const char *name, long long level)
 			fprintf(stdout, ", path: %s]\n", buffer);
 		}
 		unlink(name);
+		s = 0;
+		i = node.index;
+		b = node.block;
+		nbuffer = malloc(node.size);
+		if (nbuffer == NULL) {
+			fprintf(stderr, "malloc failed\n");
+			chdir("..");
+			return;
+		}
+		while (s < node.size) {
+			rc = block_fill(b, &block);
+			if (rc != 0) {
+				fprintf(stderr, "block fill failed\n");
+				free(nbuffer);
+				chdir("..");
+				return;
+			}
+			bbuffer = malloc(block.size);
+			if (bbuffer == NULL) {
+				fprintf(stderr, "malloc failed\n");
+				free(nbuffer);
+				chdir("..");
+				return;
+			}
+			rc = block_read(block.offset, block.compressed_size, bbuffer, block.size);
+			if (rc != 0) {
+				fprintf(stderr, "block read failed\n");
+				free(nbuffer);
+				chdir("..");
+				return;
+			}
+			memcpy(nbuffer + s, bbuffer + i, MIN(node.size - s, block.size - i));
+			free(bbuffer);
+			s += block.size;
+			b += 1;
+			i = 0;
+		}
+		buffer = nbuffer;
 		rc = symlink((char *) buffer, (char *) name);
 		if (rc != 0) {
 			fprintf(stderr, "symlink failed\n");
+			free(nbuffer);
 			return;
 		}
+		free(nbuffer);
 	} else {
 		fprintf(stderr, "unknown type: %lld\n", node.type);
 		return;
@@ -415,6 +542,13 @@ int main (int argc, char *argv[])
 		fprintf(stdout, "        offset         : %u\n", super.bits.block.offset);
 		fprintf(stdout, "        size           : %u\n", super.bits.block.size);
 		fprintf(stdout, "        compressed_size: %u\n", super.bits.block.compressed_size);
+	}
+	fprintf(stdout, "creating compressor\n");
+	compressor = compressor_create_type(super.compression_type);
+	if (compressor == NULL) {
+		fprintf(stderr, "compressor create failed\n");
+		rc = -1;
+		goto bail;
 	}
 	fprintf(stdout, "reading inode table\n");
 	bsize = 1024;
@@ -571,13 +705,14 @@ int main (int argc, char *argv[])
 	rc = 0;
 	fprintf(stdout, "finished\n");
 bail:
-	free(buffer);
 	close(fd);
+	free(cwd);
+	free(buffer);
 	free(source);
 	free(output);
 	buffer_uninit(&entry_buffer);
 	buffer_uninit(&block_buffer);
 	buffer_uninit(&inode_buffer);
-	free(cwd);
+	compressor_destroy(compressor);
 	return rc;
 }

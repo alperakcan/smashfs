@@ -73,9 +73,30 @@ int gzip_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 
 int gzip_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
-	if (dsize < ssize) {
+	int rc;
+	z_stream strm;
+	strm.zalloc = Z_NULL;
+	strm.zfree = Z_NULL;
+	strm.opaque = Z_NULL;
+	strm.avail_in = ssize;
+	strm.next_in = src;
+	strm.avail_out = dsize;
+	strm.next_out = dst;
+	rc = inflateInit2(&strm, -MAX_WBITS);
+	if (rc != Z_OK) {
+		fprintf(stderr, "inflateInit2 failed\n");
 		return -1;
 	}
-	memcpy(dst, src, ssize);
-	return dsize;
+	rc = inflate(&strm, Z_FINISH);
+	if (rc != Z_STREAM_END) {
+		fprintf(stderr, "inflate failed\n");
+		inflateEnd(&strm);
+		return -1;
+	}
+	rc = inflateEnd(&strm);
+	if (rc != Z_OK) {
+		fprintf(stderr, "inflateEnd failed\n");
+		return -1;
+	}
+	return (int) strm.total_out;
 }
