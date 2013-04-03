@@ -62,10 +62,10 @@ static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
 	sbi = dentry->d_sb->s_fs_info;
 	id = huge_encode_dev(dentry->d_sb->s_bdev->bd_dev);
 	buf->f_type = SMASHFS_MAGIC;
-	buf->f_bsize = sbi->block_size;
-	buf->f_blocks = ((sbi->bytes_used - 1) >> sbi->block_log2) + 1;
+	buf->f_bsize = sbi->super->block_size;
+	buf->f_blocks = ((sbi->bytes_used - 1) >> sbi->super->block_log2) + 1;
 	buf->f_bfree = buf->f_bavail = 0;
-	buf->f_files = sbi->inodes;
+	buf->f_files = sbi->super->inodes;
 	buf->f_ffree = 0;
 	buf->f_namelen = SMASHFS_NAME_LEN;
 	buf->f_fsid.val[0] = (u32) id;
@@ -412,10 +412,6 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	debugf("      offset         : %u\n", sbl->bits.block.offset);
 	debugf("      compressed_size: %u\n", sbl->bits.block.compressed_size);
 	debugf("      size           : %u\n", sbl->bits.block.size);
-	sbi->block_size = sbl->block_size;
-	sbi->block_log2 = sbl->block_log2;
-	sbi->inodes_size = sbl->inodes_size;
-	sbi->blocks_size = sbl->blocks_size;
 	sbi->max_inode_size  = 0;
 	sbi->max_inode_size += sbl->bits.inode.type;
 	sbi->max_inode_size += sbl->bits.inode.owner_mode;
@@ -447,7 +443,6 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		leavef();
 		return -ENOMEM;
 	}
-	memset(sbi->inodes_table, 0, sbi->inodes_size);
 	rc = smashfs_read(sb, sbi->inodes_table, sbl->inodes_offset, sbl->inodes_size);
 	if (rc != sbl->inodes_size) {
 		errorf("read failed for inodes table\n");
