@@ -255,7 +255,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 {
 	enterf();
 	leavef();
-	return -EINVAL;
+	return 0;
 }
 
 static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry, struct nameidata *nd)
