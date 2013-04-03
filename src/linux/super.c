@@ -107,7 +107,7 @@ static const struct super_operations smashfs_super_ops = {
 	.remount_fs    = smashfs_remount
 };
 
-static int smashfs_read (struct super_block *sb, void *buffer, unsigned int offset, int length)
+static int smashfs_read (struct super_block *sb, void *buffer, int offset, int length)
 {
 	int i;
 	int b;
