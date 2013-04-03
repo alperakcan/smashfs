@@ -154,6 +154,79 @@ static int block_read (long long offset, long long size, void *dst, unsigned int
 	return 0;
 }
 
+static int node_read (struct node *node, int (*function) (void *context, void *buffer, long long size), void *context)
+{
+	int rc;
+	long long s;
+	long long i;
+	long long b;
+	void *bbuffer;
+	struct block block;
+	s = 0;
+	i = node->index;
+	b = node->block;
+	while (s < node->size) {
+		rc = block_fill(b, &block);
+		if (rc != 0) {
+			fprintf(stderr, "block fill failed\n");
+			return -1;
+		}
+		bbuffer = malloc(block.size);
+		if (bbuffer == NULL) {
+			fprintf(stderr, "malloc failed\n");
+			free(bbuffer);
+			return -1;
+		}
+		rc = block_read(block.offset, block.compressed_size, bbuffer, block.size);
+		if (rc != 0) {
+			fprintf(stderr, "block read failed\n");
+			free(bbuffer);
+			return -1;
+		}
+		rc = function(context, bbuffer + i, MIN(node->size - s, block.size - i));
+		if (rc != MIN(node->size - s, block.size - i)) {
+			fprintf(stderr, "function failed\n");
+			free(bbuffer);
+			return -1;
+		}
+		free(bbuffer);
+		s += MIN(node->size - s, block.size - i);
+		b += 1;
+		i = 0;
+	}
+	return 0;
+}
+
+static int node_read_regular_file (void *context, void *buffer, long long size)
+{
+	int rc;
+	int *fd;
+	fd = context;
+	rc = write(*fd, buffer, size);
+	if (rc != size) {
+		fprintf(stderr, "write failed\n");
+	}
+	return rc;
+}
+
+static int node_read_directory (void *context, void *buffer, long long size)
+{
+	unsigned char **b;
+	b = context;
+	memcpy(*b, buffer, size);
+	*b += size;
+	return size;
+}
+
+static int node_read_symbolic_link (void *context, void *buffer, long long size)
+{
+	unsigned char **b;
+	b = context;
+	memcpy(*b, buffer, size);
+	*b += size;
+	return size;
+}
+
 static void traverse (long long inode, const char *name, long long level)
 {
 	int rc;
@@ -162,13 +235,10 @@ static void traverse (long long inode, const char *name, long long level)
 	long long e;
 	long long l;
 	long long s;
-	long long b;
-	long long i;
 	long long directory_parent;
 	long long directory_nentries;
 	long long directory_entry_number;
 	unsigned char *buffer;
-	unsigned char *bbuffer;
 	unsigned char *nbuffer;
 	struct node node;
 	struct block block;
@@ -235,9 +305,6 @@ static void traverse (long long inode, const char *name, long long level)
 			fprintf(stderr, "chdir failed\n");
 			return;
 		}
-		s = 0;
-		i = node.index;
-		b = node.block;
 		nbuffer = malloc(node.size);
 		if (nbuffer == NULL) {
 			fprintf(stderr, "malloc failed\n");
@@ -247,44 +314,16 @@ static void traverse (long long inode, const char *name, long long level)
 			}
 			return;
 		}
-		while (s < node.size) {
-			rc = block_fill(b, &block);
+		buffer = nbuffer;
+		rc = node_read(&node, node_read_directory, &buffer);
+		if (rc != 0) {
+			fprintf(stderr, "node read failed\n");
+			free(nbuffer);
+			rc = chdir("..");
 			if (rc != 0) {
-				fprintf(stderr, "block fill failed\n");
-				free(nbuffer);
-				rc = chdir("..");
-				if (rc != 0) {
-					fprintf(stderr, "chdir failed\n");
-				}
-				return;
+				fprintf(stderr, "chdir failed\n");
 			}
-			bbuffer = malloc(block.size);
-			if (bbuffer == NULL) {
-				fprintf(stderr, "malloc failed\n");
-				free(bbuffer);
-				free(nbuffer);
-				rc = chdir("..");
-				if (rc != 0) {
-					fprintf(stderr, "chdir failed\n");
-				}
-				return;
-			}
-			rc = block_read(block.offset, block.compressed_size, bbuffer, block.size);
-			if (rc != 0) {
-				fprintf(stderr, "block read failed\n");
-				free(bbuffer);
-				free(nbuffer);
-				rc = chdir("..");
-				if (rc != 0) {
-					fprintf(stderr, "chdir failed\n");
-				}
-				return;
-			}
-			memcpy(nbuffer + s, bbuffer + i, MIN(node.size - s, block.size - i));
-			free(bbuffer);
-			s += MIN(node.size - s, block.size - i);
-			b += 1;
-			i = 0;
+			return;
 		}
 		buffer = nbuffer;
 		bitbuffer_init_from_buffer(&bitbuffer, buffer, node.size);
@@ -326,86 +365,42 @@ static void traverse (long long inode, const char *name, long long level)
 			fprintf(stderr, "open failed\n");
 			return;
 		}
-		s = 0;
-		i = node.index;
-		b = node.block;
-		while (s < node.size) {
-			rc = block_fill(b, &block);
+		rc = node_read(&node, node_read_regular_file, &fd);
+		if (rc != 0) {
+			fprintf(stderr, "node read failed\n");
+			rc = chdir("..");
 			if (rc != 0) {
-				fprintf(stderr, "block fill failed\n");
-				close(fd);
-				unlink(name);
-				return;
+				fprintf(stderr, "chdir failed\n");
 			}
-			bbuffer = malloc(block.size);
-			if (bbuffer == NULL) {
-				fprintf(stderr, "malloc failed\n");
-				close(fd);
-				unlink(name);
-				return;
-			}
-			rc = block_read(block.offset, block.compressed_size, bbuffer, block.size);
-			if (rc != 0) {
-				fprintf(stderr, "block read failed\n");
-				free(bbuffer);
-				close(fd);
-				unlink(name);
-				return;
-			}
-			rc = write(fd, bbuffer + i, MIN(node.size - s, block.size - i));
-			if (rc != MIN(node.size - s, block.size - i)) {
-				fprintf(stderr, "write failed, rc: %d\n", rc);
-				free(bbuffer);
-				close(fd);
-				unlink(name);
-				return;
-			}
-			free(bbuffer);
-			s += MIN(node.size - s, block.size - i);
-			b += 1;
-			i = 0;
+			return;
 		}
 		close(fd);
 	} else if (node.type == smashfs_inode_type_symbolic_link) {
-		if (debug > 1) {
-			fprintf(stdout, ", path: %s]\n", buffer);
-		}
 		unlink(name);
-		s = 0;
-		i = node.index;
-		b = node.block;
 		nbuffer = malloc(node.size);
 		if (nbuffer == NULL) {
 			fprintf(stderr, "malloc failed\n");
+			rc = chdir("..");
+			if (rc != 0) {
+				fprintf(stderr, "chdir failed\n");
+			}
 			return;
 		}
-		while (s < node.size) {
-			rc = block_fill(b, &block);
+		buffer = nbuffer;
+		rc = node_read(&node, node_read_symbolic_link, &buffer);
+		if (rc != 0) {
+			fprintf(stderr, "node read failed\n");
+			free(nbuffer);
+			rc = chdir("..");
 			if (rc != 0) {
-				fprintf(stderr, "block fill failed\n");
-				free(nbuffer);
-				return;
+				fprintf(stderr, "chdir failed\n");
 			}
-			bbuffer = malloc(block.size);
-			if (bbuffer == NULL) {
-				fprintf(stderr, "malloc failed\n");
-				free(nbuffer);
-				return;
-			}
-			rc = block_read(block.offset, block.compressed_size, bbuffer, block.size);
-			if (rc != 0) {
-				fprintf(stderr, "block read failed\n");
-				free(bbuffer);
-				free(nbuffer);
-				return;
-			}
-			memcpy(nbuffer + s, bbuffer + i, MIN(node.size - s, block.size - i));
-			free(bbuffer);
-			s += MIN(node.size - s, block.size - i);
-			b += 1;
-			i = 0;
+			return;
 		}
 		buffer = nbuffer;
+		if (debug > 1) {
+			fprintf(stdout, ", path: %s]\n", buffer);
+		}
 		rc = symlink((char *) buffer, (char *) name);
 		if (rc != 0) {
 			fprintf(stderr, "symlink failed\n");
