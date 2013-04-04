@@ -63,7 +63,7 @@ struct source {
 
 struct node_regular_file {
 	long long size;
-	char content[0];
+	unsigned char content[0];
 };
 
 struct node_directory_entry {
@@ -79,6 +79,25 @@ struct node_directory {
 
 struct node_symbolic_link {
 	char path[0];
+};
+
+enum node_type {
+	node_type_unknown,
+	node_type_elf_file,
+	node_type_lzma_file,
+	node_type_png_file,
+	node_type_jpeg_file,
+	node_type_gif_file,
+	node_type_ico_file,
+	node_type_zip_file,
+	node_type_bin_file,
+	node_type_html_file,
+	node_type_js_file,
+	node_type_sh_file,
+	node_type_txt_file,
+	node_type_regular_file,
+	node_type_directory,
+	node_type_symbolic_link,
 };
 
 struct node {
@@ -100,6 +119,7 @@ struct node {
 		struct node_directory *directory;
 		struct node_symbolic_link *symbolic_link;
 	};
+	long long ntype;
 	UT_hash_handle hh;
 };
 
@@ -164,28 +184,21 @@ static int nodes_sort_by_number (struct node *a, struct node *b)
 	return (a->number < b->number) ? -1 : 1;
 }
 
+
+
 static int nodes_sort_by_type (struct node *a, struct node *b)
 {
-#if 0
-	int abin;
-	int bbin;
-	if (a->type == smashfs_inode_type_regular_file &&
-	    b->type == smashfs_inode_type_regular_file) {
-		if (a->regular_file->size >= 4 &&
-		    b->regular_file->size >= 4) {
-			abin = (a->regular_file->content[0] == 0x7f) && (a->regular_file->content[1] == 0x45) && (a->regular_file->content[2] == 0x4c) && (a->regular_file->content[3] == 0x46);
-			bbin = (b->regular_file->content[0] == 0x7f) && (b->regular_file->content[1] == 0x45) && (b->regular_file->content[2] == 0x4c) && (b->regular_file->content[3] == 0x46);
-			if (abin == bbin) {
-				return 0;
-			}
-			return bbin - abin;
-		}
+#if 1
+	if (a->ntype == b->ntype) {
+		return 0;
 	}
-#endif
+	return (a->ntype < b->ntype) ? -1 : 1;
+#else
 	if (a->type == b->type) {
 		return 0;
 	}
 	return (a->type < b->type) ? -1 : 1;
+#endif
 }
 
 static int output_write (void)
@@ -787,6 +800,7 @@ static struct node * node_new (FTSENT *entry)
 	node->ctime = stbuf->st_ctime;
 	node->mtime = stbuf->st_mtime;
 	if (node->type == smashfs_inode_type_regular_file) {
+		node->ntype = node_type_regular_file;
 		fd = open(entry->fts_accpath, O_RDONLY);
 		if (fd < 0) {
 			fprintf(stderr, "open failed\n");
@@ -802,6 +816,59 @@ static struct node * node_new (FTSENT *entry)
 		if (r != (ssize_t) node->regular_file->size) {
 			fprintf(stderr, "read failed path: %s, size %lld, ret: %zd\n", entry->fts_accpath, node->regular_file->size, r);
 			goto bail;
+		}
+		if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 5, ".lzma") == 0) {
+			node->ntype = node_type_lzma_file;
+		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".gif") == 0) {
+			node->ntype = node_type_gif_file;
+		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 5, ".jpeg") == 0) {
+			node->ntype = node_type_jpeg_file;
+		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".jpg") == 0) {
+			node->ntype = node_type_jpeg_file;
+		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".png") == 0) {
+			node->ntype = node_type_png_file;
+		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".bin") == 0) {
+			node->ntype = node_type_bin_file;
+		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".ico") == 0) {
+			node->ntype = node_type_ico_file;
+		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".zip") == 0) {
+			node->ntype = node_type_zip_file;
+		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".html") == 0) {
+			node->ntype = node_type_html_file;
+		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".js") == 0) {
+			node->ntype = node_type_js_file;
+		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".txt") == 0) {
+			node->ntype = node_type_txt_file;
+		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".sh") == 0) {
+			node->ntype = node_type_sh_file;
+		} else if (node->regular_file->size >= 4) {
+			if ((node->regular_file->content[0] == 0x7f) &&
+			    (node->regular_file->content[1] == 0x45) &&
+			    (node->regular_file->content[2] == 0x4c) &&
+			    (node->regular_file->content[3] == 0x46)) {
+				node->ntype = node_type_elf_file;
+			}
+		} else if (node->regular_file->size >= 11) {
+			if ((node->regular_file->content[0] == 0xff) &&
+			    (node->regular_file->content[1] == 0xd8) &&
+			    (node->regular_file->content[2] == 0xff) &&
+			    (node->regular_file->content[3] == 0xe0) &&
+			    /* skip 5 */
+			    /* skip 6 */
+			    (node->regular_file->content[6] == 0x4a) &&
+			    (node->regular_file->content[7] == 0x46) &&
+			    (node->regular_file->content[8] == 0x49) &&
+			    (node->regular_file->content[9] == 0x46) &&
+			    (node->regular_file->content[10] == 0x00)) {
+				node->ntype = node_type_jpeg_file;
+			}
+		} else if (node->regular_file->size >= 4) {
+			if ((node->regular_file->content[0] == 0x89) &&
+			    (node->regular_file->content[1] == 0x50) &&
+			    (node->regular_file->content[2] == 0x4e) &&
+			    (node->regular_file->content[3] == 0x47)) {
+				node->ntype = node_type_png_file;
+			}
 		}
 		HASH_ITER(hh, nodes_table, dnode, ndnode) {
 			if (dnode->type != smashfs_inode_type_regular_file) {
@@ -822,6 +889,7 @@ static struct node * node_new (FTSENT *entry)
 		close(fd);
 		fd = -1;
 	} else if (node->type == smashfs_inode_type_directory) {
+		node->ntype = node_type_directory;
 		node->directory = malloc(sizeof(struct node_directory));
 		if (node->directory == NULL) {
 			fprintf(stderr, "malloc failed\n");
@@ -835,6 +903,7 @@ static struct node * node_new (FTSENT *entry)
 		}
 		node->directory->parent = parent->number;
 	} else if (node->type == smashfs_inode_type_symbolic_link) {
+		node->ntype = node_type_symbolic_link;
 		node->symbolic_link = malloc(sizeof(struct node_symbolic_link) + stbuf->st_size + 1);
 		if (node->symbolic_link == NULL) {
 			fprintf(stderr, "malloc failed\n");
