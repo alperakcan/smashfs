@@ -184,8 +184,6 @@ static int nodes_sort_by_number (struct node *a, struct node *b)
 	return (a->number < b->number) ? -1 : 1;
 }
 
-
-
 static int nodes_sort_by_type (struct node *a, struct node *b)
 {
 #if 1
@@ -254,6 +252,7 @@ static int output_write (void)
 	struct buffer block_buffer;
 	struct buffer entry_buffer;
 	struct buffer super_buffer;
+	struct buffer inode_cbuffer;
 	struct buffer entry_cbuffer;
 	struct bitbuffer bitbuffer;
 
@@ -264,6 +263,7 @@ static int output_write (void)
 	buffer_init(&block_buffer);
 	buffer_init(&entry_buffer);
 	buffer_init(&super_buffer);
+	buffer_init(&inode_cbuffer);
 	buffer_init(&entry_cbuffer);
 	bitbuffer_init_from_buffer(&bitbuffer, NULL, 0);
 
@@ -586,10 +586,35 @@ static int output_write (void)
 	}
 	bitbuffer_uninit(&bitbuffer);
 
+#if 0
+	free(bc);
+	bc = malloc(size * 2);
+	if (bc == NULL) {
+		fprintf(stderr, "malloc failed\n");
+		goto bail;
+	}
+	rc = compressor_compress(compressor, buffer_buffer(&inode_buffer), size, bc, size * 2);
+	if (rc < 0) {
+		fprintf(stderr, "compress failed for inodes table\n");
+		goto bail;
+	}
+	rc = buffer_add(&inode_cbuffer, bc, rc);
+	if (rc < 0) {
+		fprintf(stdout, "buffer add failed\n");
+		goto bail;
+	}
+#else
+	rc = buffer_add(&inode_cbuffer, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
+	if (rc < 0) {
+		fprintf(stdout, "buffer add failed\n");
+		goto bail;
+	}
+#endif
+
 	fprintf(stdout, "  setting super block (4/4)\n");
 
 	super.inodes_offset  = sizeof(struct smashfs_super_block);
-	super.inodes_size    = buffer_length(&inode_buffer);
+	super.inodes_size    = buffer_length(&inode_cbuffer);
 	super.blocks_offset  = super.inodes_offset + super.inodes_size;
 	super.blocks_size    = buffer_length(&block_buffer);
 	super.entries_offset = super.blocks_offset + super.blocks_size;
@@ -655,10 +680,11 @@ static int output_write (void)
 	fprintf(stdout, "  buffers:\n");
 	fprintf(stdout, "    super: %lld bytes\n", buffer_length(&super_buffer));
 	fprintf(stdout, "    inode: %lld bytes\n", buffer_length(&inode_buffer));
+	fprintf(stdout, "           %lld bytes\n", buffer_length(&inode_cbuffer));
 	fprintf(stdout, "    block: %lld bytes\n", buffer_length(&block_buffer));
 	fprintf(stdout, "    entry: %lld bytes\n", buffer_length(&entry_buffer));
 	fprintf(stdout, "           %lld bytes\n", buffer_length(&entry_cbuffer));
-	fprintf(stdout, "    total: %lld bytes\n", buffer_length(&super_buffer) + buffer_length(&inode_buffer) + buffer_length(&block_buffer) + buffer_length(&entry_cbuffer));
+	fprintf(stdout, "    total: %lld bytes\n", buffer_length(&super_buffer) + buffer_length(&inode_cbuffer) + buffer_length(&block_buffer) + buffer_length(&entry_cbuffer));
 
 	fd = open(output, O_CREAT | O_TRUNC | O_WRONLY, 0666);
 	if (fd < 0) {
@@ -672,8 +698,8 @@ static int output_write (void)
 		goto bail;
 	}
 
-	rc = write(fd, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
-	if (rc != buffer_length(&inode_buffer)) {
+	rc = write(fd, buffer_buffer(&inode_cbuffer), buffer_length(&inode_cbuffer));
+	if (rc != buffer_length(&inode_cbuffer)) {
 		fprintf(stderr, "write failed\n");
 		goto bail;
 	}
@@ -694,6 +720,7 @@ static int output_write (void)
 	free(bc);
 	free(blocks);
 	buffer_uninit(&entry_cbuffer);
+	buffer_uninit(&inode_cbuffer);
 	buffer_uninit(&super_buffer);
 	buffer_uninit(&inode_buffer);
 	buffer_uninit(&block_buffer);
@@ -706,6 +733,7 @@ bail:
 	free(blocks);
 	bitbuffer_uninit(&bitbuffer);
 	buffer_uninit(&entry_cbuffer);
+	buffer_uninit(&inode_cbuffer);
 	buffer_uninit(&super_buffer);
 	buffer_uninit(&inode_buffer);
 	buffer_uninit(&block_buffer);

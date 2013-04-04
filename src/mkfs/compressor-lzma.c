@@ -38,6 +38,8 @@
 #define LZMA_OPTIONS		6
 #define MEMLIMIT		(256 * 1024 * 1024)
 
+#define MAX(a, b)		(((a) > (b)) ? (a) : (b))
+
 int lzma_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
 	unsigned char *d = (unsigned char *) dst;
@@ -49,7 +51,7 @@ int lzma_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 		goto bail;
 	}
 	lzma_lzma_preset(&opt, LZMA_OPTIONS);
-	opt.dict_size = ssize;
+	opt.dict_size = MAX(4096, ssize);
 	res = lzma_alone_encoder(&strm, &opt);
 	if(res != LZMA_OK) {
 		fprintf(stderr, "lzma_alone_encoder failed\n");
