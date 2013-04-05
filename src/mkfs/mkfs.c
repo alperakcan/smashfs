@@ -84,17 +84,6 @@ struct node_symbolic_link {
 enum node_type {
 	node_type_unknown,
 	node_type_elf_file,
-	node_type_lzma_file,
-	node_type_png_file,
-	node_type_jpeg_file,
-	node_type_gif_file,
-	node_type_ico_file,
-	node_type_zip_file,
-	node_type_bin_file,
-	node_type_html_file,
-	node_type_js_file,
-	node_type_sh_file,
-	node_type_txt_file,
 	node_type_regular_file,
 	node_type_directory,
 	node_type_symbolic_link,
@@ -120,6 +109,7 @@ struct node {
 		struct node_symbolic_link *symbolic_link;
 	};
 	long long ntype;
+	char path[128 * 1024];
 	UT_hash_handle hh;
 };
 
@@ -188,6 +178,15 @@ static int nodes_sort_by_type (struct node *a, struct node *b)
 {
 #if 1
 	if (a->ntype == b->ntype) {
+		if (a->type == smashfs_inode_type_regular_file &&
+		    b->type == smashfs_inode_type_regular_file) {
+			char *adot = strrchr(a->path, '.');
+			char *bdot = strrchr(b->path, '.');
+			if (adot != NULL &&
+			    bdot != NULL) {
+				return strcmp(adot, bdot);
+			}
+		}
 		return 0;
 	}
 	return (a->ntype < b->ntype) ? -1 : 1;
@@ -352,6 +351,11 @@ static int output_write (void)
 	fprintf(stdout, "  sorting inodes table by type\n");
 
 	HASH_SRT(hh, nodes_table, nodes_sort_by_type);
+	if (debug > 2) {
+		HASH_ITER(hh, nodes_table, node, nnode) {
+			fprintf(stdout, "    type: %lld, ntype: %lld, path: %s\n", node->type, node->ntype, node->path);
+		}
+	}
 
 	fprintf(stdout, "  filling entry blocks\n");
 
@@ -827,6 +831,7 @@ static struct node * node_new (FTSENT *entry)
 	node->gid = stbuf->st_gid;
 	node->ctime = stbuf->st_ctime;
 	node->mtime = stbuf->st_mtime;
+	snprintf(node->path, sizeof(node->path), "%s", entry->fts_accpath);
 	if (node->type == smashfs_inode_type_regular_file) {
 		node->ntype = node_type_regular_file;
 		fd = open(entry->fts_accpath, O_RDONLY);
@@ -845,57 +850,12 @@ static struct node * node_new (FTSENT *entry)
 			fprintf(stderr, "read failed path: %s, size %lld, ret: %zd\n", entry->fts_accpath, node->regular_file->size, r);
 			goto bail;
 		}
-		if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 5, ".lzma") == 0) {
-			node->ntype = node_type_lzma_file;
-		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".gif") == 0) {
-			node->ntype = node_type_gif_file;
-		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 5, ".jpeg") == 0) {
-			node->ntype = node_type_jpeg_file;
-		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".jpg") == 0) {
-			node->ntype = node_type_jpeg_file;
-		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".png") == 0) {
-			node->ntype = node_type_png_file;
-		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".bin") == 0) {
-			node->ntype = node_type_bin_file;
-		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".ico") == 0) {
-			node->ntype = node_type_ico_file;
-		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".zip") == 0) {
-			node->ntype = node_type_zip_file;
-		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".html") == 0) {
-			node->ntype = node_type_html_file;
-		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".js") == 0) {
-			node->ntype = node_type_js_file;
-		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".txt") == 0) {
-			node->ntype = node_type_txt_file;
-		} else if (strcmp(entry->fts_accpath + strlen(entry->fts_accpath) - 4, ".sh") == 0) {
-			node->ntype = node_type_sh_file;
-		} else if (node->regular_file->size >= 4) {
+		if (node->regular_file->size >= 4) {
 			if ((node->regular_file->content[0] == 0x7f) &&
 			    (node->regular_file->content[1] == 0x45) &&
 			    (node->regular_file->content[2] == 0x4c) &&
 			    (node->regular_file->content[3] == 0x46)) {
 				node->ntype = node_type_elf_file;
-			}
-		} else if (node->regular_file->size >= 11) {
-			if ((node->regular_file->content[0] == 0xff) &&
-			    (node->regular_file->content[1] == 0xd8) &&
-			    (node->regular_file->content[2] == 0xff) &&
-			    (node->regular_file->content[3] == 0xe0) &&
-			    /* skip 5 */
-			    /* skip 6 */
-			    (node->regular_file->content[6] == 0x4a) &&
-			    (node->regular_file->content[7] == 0x46) &&
-			    (node->regular_file->content[8] == 0x49) &&
-			    (node->regular_file->content[9] == 0x46) &&
-			    (node->regular_file->content[10] == 0x00)) {
-				node->ntype = node_type_jpeg_file;
-			}
-		} else if (node->regular_file->size >= 4) {
-			if ((node->regular_file->content[0] == 0x89) &&
-			    (node->regular_file->content[1] == 0x50) &&
-			    (node->regular_file->content[2] == 0x4e) &&
-			    (node->regular_file->content[3] == 0x47)) {
-				node->ntype = node_type_png_file;
 			}
 		}
 		HASH_ITER(hh, nodes_table, dnode, ndnode) {
