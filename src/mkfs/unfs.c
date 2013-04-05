@@ -566,7 +566,7 @@ int main (int argc, char *argv[])
 	}
 	r = 0;
 	while (r < super.inodes_size) {
-		rc = read(fd, buffer, bsize);
+		rc = read(fd, buffer, MIN(bsize, super.inodes_size - r));
 		if (rc <= 0) {
 			fprintf(stderr, "read failed\n");
 			rc = -1;
@@ -589,7 +589,7 @@ int main (int argc, char *argv[])
 	}
 	r = 0;
 	while (r < super.blocks_size) {
-		rc = read(fd, buffer, bsize);
+		rc = read(fd, buffer, MIN(bsize, super.blocks_size - r));
 		if (rc <= 0) {
 			fprintf(stderr, "read failed (rc: %d)\n", rc);
 			rc = -1;
@@ -612,7 +612,7 @@ int main (int argc, char *argv[])
 	}
 	r = 0;
 	while (r < super.entries_size) {
-		rc = read(fd, buffer, bsize);
+		rc = read(fd, buffer, MIN(bsize, super.entries_size - r));
 		if (rc <= 0) {
 			fprintf(stderr, "read failed (rc: %d)\n", rc);
 			rc = -1;

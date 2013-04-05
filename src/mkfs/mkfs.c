@@ -63,7 +63,7 @@ struct source {
 
 struct node_regular_file {
 	long long size;
-	char content[0];
+	unsigned char content[0];
 };
 
 struct node_directory_entry {
@@ -79,6 +79,14 @@ struct node_directory {
 
 struct node_symbolic_link {
 	char path[0];
+};
+
+enum node_type {
+	node_type_unknown,
+	node_type_elf_file,
+	node_type_regular_file,
+	node_type_directory,
+	node_type_symbolic_link,
 };
 
 struct node {
@@ -100,6 +108,8 @@ struct node {
 		struct node_directory *directory;
 		struct node_symbolic_link *symbolic_link;
 	};
+	long long ntype;
+	char path[128 * 1024];
 	UT_hash_handle hh;
 };
 
@@ -166,26 +176,26 @@ static int nodes_sort_by_number (struct node *a, struct node *b)
 
 static int nodes_sort_by_type (struct node *a, struct node *b)
 {
-#if 0
-	int abin;
-	int bbin;
-	if (a->type == smashfs_inode_type_regular_file &&
-	    b->type == smashfs_inode_type_regular_file) {
-		if (a->regular_file->size >= 4 &&
-		    b->regular_file->size >= 4) {
-			abin = (a->regular_file->content[0] == 0x7f) && (a->regular_file->content[1] == 0x45) && (a->regular_file->content[2] == 0x4c) && (a->regular_file->content[3] == 0x46);
-			bbin = (b->regular_file->content[0] == 0x7f) && (b->regular_file->content[1] == 0x45) && (b->regular_file->content[2] == 0x4c) && (b->regular_file->content[3] == 0x46);
-			if (abin == bbin) {
-				return 0;
+#if 1
+	if (a->ntype == b->ntype) {
+		if (a->type == smashfs_inode_type_regular_file &&
+		    b->type == smashfs_inode_type_regular_file) {
+			char *adot = strrchr(a->path, '.');
+			char *bdot = strrchr(b->path, '.');
+			if (adot != NULL &&
+			    bdot != NULL) {
+				return strcmp(adot, bdot);
 			}
-			return bbin - abin;
 		}
+		return 0;
 	}
-#endif
+	return (a->ntype < b->ntype) ? -1 : 1;
+#else
 	if (a->type == b->type) {
 		return 0;
 	}
 	return (a->type < b->type) ? -1 : 1;
+#endif
 }
 
 static int output_write (void)
@@ -241,6 +251,7 @@ static int output_write (void)
 	struct buffer block_buffer;
 	struct buffer entry_buffer;
 	struct buffer super_buffer;
+	struct buffer inode_cbuffer;
 	struct buffer entry_cbuffer;
 	struct bitbuffer bitbuffer;
 
@@ -251,6 +262,7 @@ static int output_write (void)
 	buffer_init(&block_buffer);
 	buffer_init(&entry_buffer);
 	buffer_init(&super_buffer);
+	buffer_init(&inode_cbuffer);
 	buffer_init(&entry_cbuffer);
 	bitbuffer_init_from_buffer(&bitbuffer, NULL, 0);
 
@@ -339,6 +351,11 @@ static int output_write (void)
 	fprintf(stdout, "  sorting inodes table by type\n");
 
 	HASH_SRT(hh, nodes_table, nodes_sort_by_type);
+	if (debug > 2) {
+		HASH_ITER(hh, nodes_table, node, nnode) {
+			fprintf(stdout, "    type: %lld, ntype: %lld, path: %s\n", node->type, node->ntype, node->path);
+		}
+	}
 
 	fprintf(stdout, "  filling entry blocks\n");
 
@@ -573,10 +590,35 @@ static int output_write (void)
 	}
 	bitbuffer_uninit(&bitbuffer);
 
+#if 0
+	free(bc);
+	bc = malloc(size * 2);
+	if (bc == NULL) {
+		fprintf(stderr, "malloc failed\n");
+		goto bail;
+	}
+	rc = compressor_compress(compressor, buffer_buffer(&inode_buffer), size, bc, size * 2);
+	if (rc < 0) {
+		fprintf(stderr, "compress failed for inodes table\n");
+		goto bail;
+	}
+	rc = buffer_add(&inode_cbuffer, bc, rc);
+	if (rc < 0) {
+		fprintf(stdout, "buffer add failed\n");
+		goto bail;
+	}
+#else
+	rc = buffer_add(&inode_cbuffer, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
+	if (rc < 0) {
+		fprintf(stdout, "buffer add failed\n");
+		goto bail;
+	}
+#endif
+
 	fprintf(stdout, "  setting super block (4/4)\n");
 
 	super.inodes_offset  = sizeof(struct smashfs_super_block);
-	super.inodes_size    = buffer_length(&inode_buffer);
+	super.inodes_size    = buffer_length(&inode_cbuffer);
 	super.blocks_offset  = super.inodes_offset + super.inodes_size;
 	super.blocks_size    = buffer_length(&block_buffer);
 	super.entries_offset = super.blocks_offset + super.blocks_size;
@@ -642,10 +684,11 @@ static int output_write (void)
 	fprintf(stdout, "  buffers:\n");
 	fprintf(stdout, "    super: %lld bytes\n", buffer_length(&super_buffer));
 	fprintf(stdout, "    inode: %lld bytes\n", buffer_length(&inode_buffer));
+	fprintf(stdout, "           %lld bytes\n", buffer_length(&inode_cbuffer));
 	fprintf(stdout, "    block: %lld bytes\n", buffer_length(&block_buffer));
 	fprintf(stdout, "    entry: %lld bytes\n", buffer_length(&entry_buffer));
 	fprintf(stdout, "           %lld bytes\n", buffer_length(&entry_cbuffer));
-	fprintf(stdout, "    total: %lld bytes\n", buffer_length(&super_buffer) + buffer_length(&inode_buffer) + buffer_length(&block_buffer) + buffer_length(&entry_cbuffer));
+	fprintf(stdout, "    total: %lld bytes\n", buffer_length(&super_buffer) + buffer_length(&inode_cbuffer) + buffer_length(&block_buffer) + buffer_length(&entry_cbuffer));
 
 	fd = open(output, O_CREAT | O_TRUNC | O_WRONLY, 0666);
 	if (fd < 0) {
@@ -659,8 +702,8 @@ static int output_write (void)
 		goto bail;
 	}
 
-	rc = write(fd, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
-	if (rc != buffer_length(&inode_buffer)) {
+	rc = write(fd, buffer_buffer(&inode_cbuffer), buffer_length(&inode_cbuffer));
+	if (rc != buffer_length(&inode_cbuffer)) {
 		fprintf(stderr, "write failed\n");
 		goto bail;
 	}
@@ -681,6 +724,7 @@ static int output_write (void)
 	free(bc);
 	free(blocks);
 	buffer_uninit(&entry_cbuffer);
+	buffer_uninit(&inode_cbuffer);
 	buffer_uninit(&super_buffer);
 	buffer_uninit(&inode_buffer);
 	buffer_uninit(&block_buffer);
@@ -693,6 +737,7 @@ bail:
 	free(blocks);
 	bitbuffer_uninit(&bitbuffer);
 	buffer_uninit(&entry_cbuffer);
+	buffer_uninit(&inode_cbuffer);
 	buffer_uninit(&super_buffer);
 	buffer_uninit(&inode_buffer);
 	buffer_uninit(&block_buffer);
@@ -786,7 +831,9 @@ static struct node * node_new (FTSENT *entry)
 	node->gid = stbuf->st_gid;
 	node->ctime = stbuf->st_ctime;
 	node->mtime = stbuf->st_mtime;
+	snprintf(node->path, sizeof(node->path), "%s", entry->fts_accpath);
 	if (node->type == smashfs_inode_type_regular_file) {
+		node->ntype = node_type_regular_file;
 		fd = open(entry->fts_accpath, O_RDONLY);
 		if (fd < 0) {
 			fprintf(stderr, "open failed\n");
@@ -802,6 +849,14 @@ static struct node * node_new (FTSENT *entry)
 		if (r != (ssize_t) node->regular_file->size) {
 			fprintf(stderr, "read failed path: %s, size %lld, ret: %zd\n", entry->fts_accpath, node->regular_file->size, r);
 			goto bail;
+		}
+		if (node->regular_file->size >= 4) {
+			if ((node->regular_file->content[0] == 0x7f) &&
+			    (node->regular_file->content[1] == 0x45) &&
+			    (node->regular_file->content[2] == 0x4c) &&
+			    (node->regular_file->content[3] == 0x46)) {
+				node->ntype = node_type_elf_file;
+			}
 		}
 		HASH_ITER(hh, nodes_table, dnode, ndnode) {
 			if (dnode->type != smashfs_inode_type_regular_file) {
@@ -822,6 +877,7 @@ static struct node * node_new (FTSENT *entry)
 		close(fd);
 		fd = -1;
 	} else if (node->type == smashfs_inode_type_directory) {
+		node->ntype = node_type_directory;
 		node->directory = malloc(sizeof(struct node_directory));
 		if (node->directory == NULL) {
 			fprintf(stderr, "malloc failed\n");
@@ -835,6 +891,7 @@ static struct node * node_new (FTSENT *entry)
 		}
 		node->directory->parent = parent->number;
 	} else if (node->type == smashfs_inode_type_symbolic_link) {
+		node->ntype = node_type_symbolic_link;
 		node->symbolic_link = malloc(sizeof(struct node_symbolic_link) + stbuf->st_size + 1);
 		if (node->symbolic_link == NULL) {
 			fprintf(stderr, "malloc failed\n");
