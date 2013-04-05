@@ -2,7 +2,7 @@
 MOD_NAME    ?= smashfs
 
 CHIP_ARCH   ?= x86
-KERNEL_PATH ?= /usr/src/linux
+KERNEL_PATH ?= /usr/src/linux-headers-$(shell uname -r)
 
 obj-m := ${MOD_NAME}.o
 

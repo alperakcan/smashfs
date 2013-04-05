@@ -63,8 +63,9 @@ static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
 	id = huge_encode_dev(dentry->d_sb->s_bdev->bd_dev);
 	buf->f_type = SMASHFS_MAGIC;
 	buf->f_bsize = sbi->super->block_size;
-	buf->f_blocks = ((sbi->bytes_used - 1) >> sbi->super->block_log2) + 1;
-	buf->f_bfree = buf->f_bavail = 0;
+	buf->f_blocks = sbi->super->blocks;
+	buf->f_bfree = 0;
+	buf->f_bavail = 0;
 	buf->f_files = sbi->super->inodes;
 	buf->f_ffree = 0;
 	buf->f_namelen = SMASHFS_NAME_LEN;
@@ -74,7 +75,7 @@ static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
 	return 0;
 }
 
-static int smashfs_remount(struct super_block *sb, int *flags, char *data)
+static int smashfs_remount (struct super_block *sb, int *flags, char *data)
 {
 	enterf();
 	*flags |= MS_RDONLY;
@@ -83,7 +84,7 @@ static int smashfs_remount(struct super_block *sb, int *flags, char *data)
 }
 
 
-static void smashfs_put_super(struct super_block *sb)
+static void smashfs_put_super (struct super_block *sb)
 {
 	struct smashfs_super_info *sbi;
 	enterf();
@@ -219,30 +220,30 @@ struct node {
 static int node_fill (struct super_block *sb, long long number, struct node *node)
 {
 	int rc;
-	struct bitbuffer bitbuffer;
+	struct bitbuffer bb;
 	struct smashfs_super_info *sbi;
 	enterf();
 	sbi = sb->s_fs_info;
-	rc = bitbuffer_init_from_buffer(&bitbuffer, sbi->inodes_table, sbi->inodes_size);
+	rc = bitbuffer_init_from_buffer(&bb, sbi->inodes_table, sbi->super->inodes_size);
 	if (rc != 0) {
 		errorf("bitbuffer init for inodes tabled failed\n");
 		leavef();
 		return -1;
 	}
-	bitbuffer_setpos(&bitbuffer, number * sbi->max_inode_size);
+	bitbuffer_setpos(&bb, number * sbi->max_inode_size);
 	node->number     = number;
-	node->type       = bitbuffer_getbits(&bitbuffer, sbi->super->bits.inode.type);
-	node->owner_mode = bitbuffer_getbits(&bitbuffer, sbi->super->bits.inode.owner_mode);
-	node->group_mode = bitbuffer_getbits(&bitbuffer, sbi->super->bits.inode.group_mode);
-	node->other_mode = bitbuffer_getbits(&bitbuffer, sbi->super->bits.inode.other_mode);
-	node->uid        = bitbuffer_getbits(&bitbuffer, sbi->super->bits.inode.uid);
-	node->gid        = bitbuffer_getbits(&bitbuffer, sbi->super->bits.inode.gid);
-	node->ctime      = bitbuffer_getbits(&bitbuffer, sbi->super->bits.inode.ctime);
-	node->mtime      = bitbuffer_getbits(&bitbuffer, sbi->super->bits.inode.mtime);
-	node->size       = bitbuffer_getbits(&bitbuffer, sbi->super->bits.inode.size);
-	node->block      = bitbuffer_getbits(&bitbuffer, sbi->super->bits.inode.block);
-	node->index      = bitbuffer_getbits(&bitbuffer, sbi->super->bits.inode.index);
-	bitbuffer_uninit(&bitbuffer);
+	node->type       = bitbuffer_getbits(&bb, sbi->super->bits.inode.type);
+	node->owner_mode = bitbuffer_getbits(&bb, sbi->super->bits.inode.owner_mode);
+	node->group_mode = bitbuffer_getbits(&bb, sbi->super->bits.inode.group_mode);
+	node->other_mode = bitbuffer_getbits(&bb, sbi->super->bits.inode.other_mode);
+	node->uid        = bitbuffer_getbits(&bb, sbi->super->bits.inode.uid);
+	node->gid        = bitbuffer_getbits(&bb, sbi->super->bits.inode.gid);
+	node->ctime      = bitbuffer_getbits(&bb, sbi->super->bits.inode.ctime);
+	node->mtime      = bitbuffer_getbits(&bb, sbi->super->bits.inode.mtime);
+	node->size       = bitbuffer_getbits(&bb, sbi->super->bits.inode.size);
+	node->block      = bitbuffer_getbits(&bb, sbi->super->bits.inode.block);
+	node->index      = bitbuffer_getbits(&bb, sbi->super->bits.inode.index);
+	bitbuffer_uninit(&bb);
 	debugf("node\n");
 	debugf("  number: %lld\n", node->number);
 	debugf("  type  : %lld\n", node->type);
