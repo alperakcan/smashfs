@@ -31,6 +31,7 @@ struct smashfs_super_info {
 	int devblksize;
 	int devblksize_log2;
 	long long max_inode_size;
+	long long max_block_size;
 	struct smashfs_super_block *super;
 	unsigned char *inodes_table;
 	unsigned char *blocks_table;

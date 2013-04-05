@@ -138,7 +138,7 @@ static int block_fill (long long number, struct block *block)
 	bitbuffer_setpos(&bitbuffer, number * max_block_size);
 	block->offset           = bitbuffer_getbits(&bitbuffer, super.bits.block.offset);
 	block->compressed_size  = bitbuffer_getbits(&bitbuffer, super.bits.block.compressed_size) + super.min.block.compressed_size;
-	block->size             = (number < super.blocks) ? super.block_size :bitbuffer_getbits(&bitbuffer, super.bits.block.size);
+	block->size             = (number < super.blocks) ? super.block_size : bitbuffer_getbits(&bitbuffer, super.bits.block.size);
 	bitbuffer_uninit(&bitbuffer);
 	return 0;
 }
@@ -163,7 +163,6 @@ static int node_read (struct node *node, int (*function) (void *context, void *b
 		bbuffer = malloc(block.size);
 		if (bbuffer == NULL) {
 			fprintf(stderr, "malloc failed\n");
-			free(bbuffer);
 			return -1;
 		}
 		rc = compressor_uncompress(compressor, buffer_buffer(&entry_buffer) + block.offset, block.compressed_size, bbuffer, block.size);
