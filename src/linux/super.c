@@ -441,7 +441,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		directory_entry_number = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.number);
 		bitbuffer_uninit(&bb);
 		buffer += s;
-		debugf("  - %s\n", (char *) buffer);
+		debugf("  - %s (number: %lld)\n", (char *) buffer, directory_entry_number);
 		buffer += strlen((char *) buffer) + 1;
 	}
 	kfree(nbuffer);
