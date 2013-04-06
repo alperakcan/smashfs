@@ -153,7 +153,6 @@ static int smashfs_read (struct super_block *sb, void *buffer, int offset, int l
 	bytes = -index;
 	debugf("bytes: %d, length: %d, bytes < length: %d\n", bytes, length, bytes < length);
 	while (bytes < length) {
-		debugf("get block %d\n", block);
 		bh[b] = sb_getblk(sb, block);
 		if (bh[b] == NULL) {
 			errorf("sb_getblk failed\n");
@@ -390,6 +389,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	long long directory_nentries;
 	long long directory_entry_number;
 	enterf();
+	nbuffer = NULL;
 	inode = filp->f_path.dentry->d_inode;
 	sb = inode->i_sb;
 	sbi = sb->s_fs_info;
@@ -418,6 +418,10 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		leavef();
 		return -EINVAL;
 	}
+	if (filp->f_pos >= node.size) {
+		debugf("finished reading\n");
+		goto finish;
+	}
 	nbuffer = kmalloc(node.size, GFP_KERNEL);
 	if (nbuffer == NULL) {
 		errorf("kmalloc failed\n");
@@ -442,7 +446,10 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	s += sbi->super->bits.inode.directory.nentries;
 	s  = (s + 7) / 8;
 	buffer += s;
-	for (e = 0; e < directory_nentries; e++) {
+	if (filp->f_pos < 3 + s) {
+		filp->f_pos += s;
+	}
+	for (e = 0; e < directory_nentries && filp->f_pos < 3 + node.size; e++) {
 		s  = 0;
 		s += sbi->super->bits.inode.directory.entries.number;
 		s  = (s + 7) / 8;
@@ -451,19 +458,35 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		bitbuffer_uninit(&bb);
 		buffer += s;
 		debugf("  - %s (number: %lld)\n", (char *) buffer, directory_entry_number);
+		debugf("calling filldir(%p, %s, %zd, %lld, %lld, %d)\n", dirent, (char *) buffer, strlen((char *) buffer), filp->f_pos, directory_entry_number, DT_DIR);
+		if (filldir(dirent, (char *) buffer, strlen((char *) buffer), filp->f_pos, directory_entry_number, DT_DIR) < 0) {
+			errorf("filldir failed\n");
+			goto finish;
+		}
+		filp->f_pos += s;
+		filp->f_pos += strlen((char *) buffer) + 1;
 		buffer += strlen((char *) buffer) + 1;
 	}
-	kfree(nbuffer);
+	if (nbuffer != NULL) {
+		kfree(nbuffer);
+	}
 	leavef();
 	return 0;
 finish:
+	if (nbuffer != NULL) {
+		kfree(nbuffer);
+	}
 	leavef();
 	return 0;
 }
 
 static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry, struct nameidata *nd)
 {
+	struct inode *inode;
 	enterf();
+	debugf("dir: %p, dentry: %p, nd: %p\n", dir, dentry, nd);
+	debugf("dentry->d_inode: %p\n", dentry->d_inode);
+	debugf("dentry->d_ino: %p\n", dentry->d_ino);
 	leavef();
 	return ERR_PTR(-EINVAL);
 }
@@ -514,7 +537,6 @@ static struct inode * smashfs_get_inode (struct super_block *sb, long long numbe
 		leavef();
 		return ERR_PTR(-ENOMEM);
 	}
-#if 0
 	if (node.owner_mode & smashfs_inode_mode_read) {
 		mode |= S_IRUSR;
 	}
@@ -542,9 +564,6 @@ static struct inode * smashfs_get_inode (struct super_block *sb, long long numbe
 	if (node.other_mode & smashfs_inode_mode_execute) {
 		mode |= S_IXOTH;
 	}
-#else
-	mode |= 0777;
-#endif
 	inode->i_mode   = mode;
 	inode->i_uid    = node.uid;
 	inode->i_gid    = node.gid;
