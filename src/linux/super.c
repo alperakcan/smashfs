@@ -33,6 +33,7 @@
 #include <linux/pagemap.h>
 #include <linux/buffer_head.h>
 #include <linux/statfs.h>
+#include <linux/namei.h>
 
 #include "../include/smashfs.h"
 #include "bitbuffer.h"
@@ -53,6 +54,8 @@
 #define leavef() { \
 	debugf("leave (%s %s:%d)\n", __FUNCTION__, __FILE__, __LINE__); \
 }
+
+static struct inode * smashfs_get_inode (struct super_block *sb, long long number);
 
 static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
 {
@@ -383,7 +386,6 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	unsigned char *nbuffer;
 	struct bitbuffer bb;
 	long long e;
-	long long l;
 	long long s;
 	long long directory_parent;
 	long long directory_nentries;
@@ -482,11 +484,79 @@ finish:
 
 static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry, struct nameidata *nd)
 {
+	int rc;
 	struct inode *inode;
+	struct node node;
+	struct super_block *sb;
+	struct smashfs_super_info *sbi;
+	unsigned char *buffer;
+	unsigned char *nbuffer;
+	struct bitbuffer bb;
+	long long e;
+	long long s;
+	long long directory_parent;
+	long long directory_nentries;
+	long long directory_entry_number;
 	enterf();
-	debugf("dir: %p, dentry: %p, nd: %p\n", dir, dentry, nd);
-	debugf("dentry->d_inode: %p\n", dentry->d_inode);
-	debugf("dentry->d_ino: %p\n", dentry->d_ino);
+	nbuffer = NULL;
+	inode = NULL;
+	sb = dir->i_sb;
+	sbi = sb->s_fs_info;
+	rc = node_fill(sb, dir->i_ino, &node);
+	if (rc != 0) {
+		errorf("node fill failed\n");
+		leavef();
+		return ERR_PTR(-EINVAL);
+	}
+	nbuffer = kmalloc(node.size, GFP_KERNEL);
+	if (nbuffer == NULL) {
+		errorf("kmalloc failed\n");
+		leavef();
+		return ERR_PTR(-EINVAL);
+	}
+	buffer = nbuffer;
+	rc = node_read(sb, &node, node_read_directory, &buffer);
+	if (rc != 0) {
+		errorf("node read failed\n");
+		kfree(nbuffer);
+		leavef();
+		return ERR_PTR(-EINVAL);
+	}
+	buffer = nbuffer;
+	bitbuffer_init_from_buffer(&bb, buffer, node.size);
+	directory_parent   = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.parent);
+	directory_nentries = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.nentries);
+	bitbuffer_uninit(&bb);
+	debugf("number: %lld, parent: %lld, nentries: %lld\n", node.number, directory_parent, directory_nentries);
+	s  = sbi->super->bits.inode.directory.parent;
+	s += sbi->super->bits.inode.directory.nentries;
+	s  = (s + 7) / 8;
+	buffer += s;
+	for (e = 0; e < directory_nentries; e++) {
+		s  = 0;
+		s += sbi->super->bits.inode.directory.entries.number;
+		s  = (s + 7) / 8;
+		bitbuffer_init_from_buffer(&bb, buffer, s);
+		directory_entry_number = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.number);
+		bitbuffer_uninit(&bb);
+		buffer += s;
+		debugf("  - %s (number: %lld)\n", (char *) buffer, directory_entry_number);
+		if (strncmp(buffer, dentry->d_name.name, dentry->d_name.len) == 0) {
+			inode = smashfs_get_inode(sb, directory_entry_number);
+			if (inode == NULL) {
+				errorf("get inode failed\n");
+			}
+			break;
+		}
+		buffer += strlen((char *) buffer) + 1;
+	}
+	if (nbuffer != NULL) {
+		kfree(nbuffer);
+	}
+	if (inode != NULL) {
+		leavef();
+		return d_splice_alias(inode, dentry);
+	}
 	leavef();
 	return ERR_PTR(-EINVAL);
 }
