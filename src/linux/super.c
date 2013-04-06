@@ -561,6 +561,13 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	return ERR_PTR(-EINVAL);
 }
 
+static int smashfs_readpage(struct file *file, struct page * page)
+{
+	enterf();
+	leavef();
+	return 0;
+}
+
 static const struct file_operations smashfs_directory_operations = {
 	.llseek  = default_llseek,
 	.read    = generic_read_dir,
@@ -569,6 +576,10 @@ static const struct file_operations smashfs_directory_operations = {
 
 static const struct inode_operations smashfs_dir_inode_operations = {
 	.lookup = smashfs_lookup,
+};
+
+static const struct address_space_operations smashfs_aops = {
+	.readpage = smashfs_readpage
 };
 
 static struct inode * smashfs_get_inode (struct super_block *sb, long long number)
@@ -601,6 +612,10 @@ static struct inode * smashfs_get_inode (struct super_block *sb, long long numbe
 		mode         = S_IFDIR;
 		inode->i_op  = &smashfs_dir_inode_operations;
 		inode->i_fop = &smashfs_directory_operations;
+	} else if (node.type == smashfs_inode_type_regular_file) {
+		mode                = S_IFREG;
+		inode->i_fop        = &generic_ro_fops;
+		inode->i_data.a_ops = &smashfs_aops;
 	} else {
 		errorf("unknown node type: %lld\n", node.type);
 		unlock_new_inode(inode);
