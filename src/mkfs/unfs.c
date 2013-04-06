@@ -138,8 +138,15 @@ static int block_fill (long long number, struct block *block)
 	bitbuffer_setpos(&bitbuffer, number * max_block_size);
 	block->offset           = bitbuffer_getbits(&bitbuffer, super.bits.block.offset);
 	block->compressed_size  = bitbuffer_getbits(&bitbuffer, super.bits.block.compressed_size) + super.min.block.compressed_size;
-	block->size             = (number < super.blocks) ? super.block_size : bitbuffer_getbits(&bitbuffer, super.bits.block.size);
+	block->size             = (number + 1 < super.blocks) ? super.block_size : bitbuffer_getbits(&bitbuffer, super.bits.block.size);
 	bitbuffer_uninit(&bitbuffer);
+	if (debug > 2) {
+		fprintf(stdout, "block:\n");
+		fprintf(stdout, "  number: %lld\n", number);
+		fprintf(stdout, "  offset: %lld\n", block->offset);
+		fprintf(stdout, "  csize : %lld\n", block->compressed_size);
+		fprintf(stdout, "  size  : %lld\n", block->size);
+	}
 	return 0;
 }
 

@@ -138,6 +138,7 @@ static int no_uid				= 0;
 static int no_gid				= 0;
 static int no_ctime				= 0;
 static int no_mtime				= 0;
+static int no_padding				= 0;
 
 static struct compressor *compressor		= NULL;
 
@@ -221,6 +222,7 @@ static int output_write (void)
 	long long offset;
 	long long index;
 	long long block;
+	long long total;
 
 	long long min_inode_ctime;
 	long long min_inode_mtime;
@@ -696,28 +698,43 @@ static int output_write (void)
 		goto bail;
 	}
 
+	total = 0;
+
 	rc = write(fd, buffer_buffer(&super_buffer), buffer_length(&super_buffer));
 	if (rc != buffer_length(&super_buffer)) {
 		fprintf(stderr, "write failed\n");
 		goto bail;
 	}
+	total += rc;
 
 	rc = write(fd, buffer_buffer(&inode_cbuffer), buffer_length(&inode_cbuffer));
 	if (rc != buffer_length(&inode_cbuffer)) {
 		fprintf(stderr, "write failed\n");
 		goto bail;
 	}
+	total += rc;
 
 	rc = write(fd, buffer_buffer(&block_buffer), buffer_length(&block_buffer));
 	if (rc != buffer_length(&block_buffer)) {
 		fprintf(stderr, "write failed\n");
 		goto bail;
 	}
+	total += rc;
 
 	rc = write(fd, buffer_buffer(&entry_cbuffer), buffer_length(&entry_cbuffer));
 	if (rc != buffer_length(&entry_cbuffer)) {
 		fprintf(stderr, "write failed\n");
 		goto bail;
+	}
+	total += rc;
+
+	if ((no_padding == 0) && (index = total & (4096 - 1))) {
+		char tmp[4096] = { 0 };
+		rc = write(fd, tmp, 4096 - index);
+		if (rc != 4096 - index) {
+			fprintf(stderr, "write failed\n");
+			goto bail;
+		}
 	}
 
 	close(fd);
@@ -1085,6 +1102,7 @@ static void help_print (const char *pname)
 	fprintf(stdout, "  --no_gid         : disable gid\n");
 	fprintf(stdout, "  --no_ctime       : disable ctime\n");
 	fprintf(stdout, "  --no_mtime       : disable mtime\n");
+	fprintf(stdout, "  --no_padding     : disable padding\n");
 }
 
 int main (int argc, char *argv[])
@@ -1108,6 +1126,7 @@ int main (int argc, char *argv[])
 		{"no_gid"       , no_argument      , 0, 0x103 },
 		{"no_ctime"     , no_argument      , 0, 0x104 },
 		{"no_mtime"     , no_argument      , 0, 0x105 },
+		{"no_padding"   , no_argument      , 0, 0x106 },
 		{"help"         , no_argument      , 0, 'h' },
 		{ 0             , 0                , 0,  0 }
 	};
@@ -1171,6 +1190,9 @@ int main (int argc, char *argv[])
 				break;
 			case 0x105:
 				no_mtime = 1;
+				break;
+			case 0x106:
+				no_padding = 1;
 				break;
 			case 'h':
 				help_print(argv[0]);

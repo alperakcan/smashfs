@@ -223,7 +223,9 @@ static int block_fill (struct super_block *sb, long long number, struct block *b
 	struct bitbuffer bb;
 	struct smashfs_super_info *sbi;
 	enterf();
+	debugf("looking for block number: %lld\n", number);
 	sbi = sb->s_fs_info;
+	debugf("blocks_table: %p, blocks_size: %d\n", sbi->blocks_table, sbi->super->blocks_size);
 	rc = bitbuffer_init_from_buffer(&bb, sbi->blocks_table, sbi->super->blocks_size);
 	if (rc != 0) {
 		errorf("bitbuffer init from buffer failed\n");
@@ -233,8 +235,14 @@ static int block_fill (struct super_block *sb, long long number, struct block *b
 	bitbuffer_setpos(&bb, number * sbi->max_block_size);
 	block->offset           = bitbuffer_getbits(&bb, sbi->super->bits.block.offset);
 	block->compressed_size  = bitbuffer_getbits(&bb, sbi->super->bits.block.compressed_size) + sbi->super->min.block.compressed_size;
-	block->size             = (number < sbi->super->blocks) ? sbi->super->block_size : bitbuffer_getbits(&bb, sbi->super->bits.block.size);
+	block->size             = (number + 1 < sbi->super->blocks) ? sbi->super->block_size : bitbuffer_getbits(&bb, sbi->super->bits.block.size);
 	bitbuffer_uninit(&bb);
+	debugf("block:\n");
+	debugf("  number: %lld\n", number);
+	debugf("  offset: %lld\n", block->offset);
+	debugf("  csize : %lld\n", block->compressed_size);
+	debugf("  size  : %lld\n", block->size);
+	leavef();
 	return 0;
 }
 
@@ -261,6 +269,7 @@ static int node_fill (struct super_block *sb, long long number, struct node *nod
 	enterf();
 	debugf("looking for node number: %lld\n", number);
 	sbi = sb->s_fs_info;
+	debugf("inodes_table: %p, inodes_size: %d", sbi->inodes_table, sbi->super->inodes_size);
 	rc = bitbuffer_init_from_buffer(&bb, sbi->inodes_table, sbi->super->inodes_size);
 	if (rc != 0) {
 		errorf("bitbuffer init for inodes tabled failed\n");
@@ -381,7 +390,9 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	long long directory_nentries;
 	long long directory_entry_number;
 	enterf();
-	inode = filp->f_dentry->d_inode;
+	inode = filp->f_path.dentry->d_inode;
+	sb = inode->i_sb;
+	sbi = sb->s_fs_info;
 	while (filp->f_pos < 3) {
 		char *name;
 		int i_ino;
@@ -401,8 +412,6 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		}
 		filp->f_pos += size;
 	}
-	sb = inode->i_sb;
-	sbi = sb->s_fs_info;
 	rc = node_fill(sb, inode->i_ino, &node);
 	if (rc != 0) {
 		errorf("node fill failed\n");
@@ -460,7 +469,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 }
 
 static const struct file_operations smashfs_directory_operations = {
-	.llseek  = generic_file_llseek,
+	.llseek  = default_llseek,
 	.read    = generic_read_dir,
 	.readdir = smashfs_readdir,
 };
@@ -683,7 +692,6 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		iput(root);
 		goto bail;
 	}
-	kfree(sbl);
 	leavef();
 	return 0;
 bail:
