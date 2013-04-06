@@ -561,7 +561,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	return ERR_PTR(-EINVAL);
 }
 
-static int smashfs_readpage(struct file *file, struct page * page)
+static int smashfs_readpage(struct file *file, struct page *page)
 {
 	enterf();
 	leavef();
