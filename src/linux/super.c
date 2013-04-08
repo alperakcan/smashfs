@@ -724,20 +724,6 @@ static int smashfs_readpage(struct file *file, struct page *page)
 	return 0;
 }
 
-static const struct file_operations smashfs_directory_operations = {
-	.llseek  = default_llseek,
-	.read    = generic_read_dir,
-	.readdir = smashfs_readdir,
-};
-
-static const struct inode_operations smashfs_dir_inode_operations = {
-	.lookup = smashfs_lookup,
-};
-
-static const struct address_space_operations smashfs_aops = {
-	.readpage = smashfs_readpage
-};
-
 static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
 {
 	u64 id;
@@ -785,6 +771,20 @@ static void smashfs_put_super (struct super_block *sb)
 	kfree(sbi);
 	leavef();
 }
+
+static const struct file_operations smashfs_directory_operations = {
+	.llseek  = default_llseek,
+	.read    = generic_read_dir,
+	.readdir = smashfs_readdir,
+};
+
+static const struct inode_operations smashfs_dir_inode_operations = {
+	.lookup = smashfs_lookup,
+};
+
+static const struct address_space_operations smashfs_aops = {
+	.readpage = smashfs_readpage
+};
 
 static const struct super_operations smashfs_super_ops = {
 	.statfs        = smashfs_statfs,
