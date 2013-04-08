@@ -448,7 +448,7 @@ static int node_read (struct super_block *sb, struct node *node, int (*function)
 			errorf("uncompress failed");
 			goto bail;
 		}
-		rc = function(context, cbuffer + i, min_t(long long, node->size - s, block.size - i));
+		rc = function(context, ubuffer + i, min_t(long long, node->size - s, block.size - i));
 		if (rc != min_t(long long, node->size - s, block.size - i)) {
 			errorf("function failed\n");
 			goto bail;

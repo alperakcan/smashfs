@@ -46,7 +46,7 @@ int gzip_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsiz
 	z_stream stream;
 
 	stream.workspace = vmalloc(zlib_inflate_workspacesize());
-	if (!stream.workspace ) {
+	if (stream.workspace == NULL) {
 		return -1;
 	}
 
@@ -63,7 +63,7 @@ int gzip_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsiz
 	rc = zlib_inflateReset(&stream);
 	if (rc != Z_OK) {
 		zlib_inflateEnd(&stream);
-		zlib_inflateInit(&stream);
+		zlib_inflateInit2(&stream, -MAX_WBITS);
 	}
 
 	rc = zlib_inflate(&stream, Z_FINISH);
