@@ -140,6 +140,7 @@ static int no_gid				= 0;
 static int no_ctime				= 0;
 static int no_mtime				= 0;
 static int no_padding				= 0;
+static int no_duplicates			= 0;
 
 static struct compressor *compressor		= NULL;
 
@@ -884,21 +885,23 @@ static struct node * node_new (FTSENT *entry)
 				node->ntype = node_type_elf_file;
 			}
 		}
-		HASH_ITER(hh, nodes_table, dnode, ndnode) {
-			if (dnode->type != smashfs_inode_type_regular_file) {
-				continue;
+		if (no_duplicates == 0) {
+			HASH_ITER(hh, nodes_table, dnode, ndnode) {
+				if (dnode->type != smashfs_inode_type_regular_file) {
+					continue;
+				}
+				if (dnode->regular_file->size != node->regular_file->size) {
+					continue;
+				}
+				if (memcmp(dnode->regular_file->content, node->regular_file->content, node->regular_file->size) != 0) {
+					continue;
+				}
+				free(node->pointer);
+				free(node);
+				node = dnode;
+				duplicate = 1;
+				break;
 			}
-			if (dnode->regular_file->size != node->regular_file->size) {
-				continue;
-			}
-			if (memcmp(dnode->regular_file->content, node->regular_file->content, node->regular_file->size) != 0) {
-				continue;
-			}
-			free(node->pointer);
-			free(node);
-			node = dnode;
-			duplicate = 1;
-			break;
 		}
 		close(fd);
 		fd = -1;
@@ -1113,6 +1116,7 @@ static void help_print (const char *pname)
 	fprintf(stdout, "  --no_ctime       : disable ctime\n");
 	fprintf(stdout, "  --no_mtime       : disable mtime\n");
 	fprintf(stdout, "  --no_padding     : disable padding\n");
+	fprintf(stdout, "  --no_duplicates  : disable duplicate file checking\n");
 }
 
 int main (int argc, char *argv[])
@@ -1137,6 +1141,7 @@ int main (int argc, char *argv[])
 		{"no_ctime"     , no_argument      , 0, 0x104 },
 		{"no_mtime"     , no_argument      , 0, 0x105 },
 		{"no_padding"   , no_argument      , 0, 0x106 },
+		{"no_duplicates", no_argument      , 0, 0x107 },
 		{"help"         , no_argument      , 0, 'h' },
 		{ 0             , 0                , 0,  0 }
 	};
@@ -1203,6 +1208,9 @@ int main (int argc, char *argv[])
 				break;
 			case 0x106:
 				no_padding = 1;
+				break;
+			case 0x107:
+				no_duplicates = 1;
 				break;
 			case 'h':
 				help_print(argv[0]);
