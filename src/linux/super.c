@@ -484,9 +484,9 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	struct node node;
 	struct node enode;
 
+	char *buffer;
+	char *nbuffer;
 	struct bitbuffer bb;
-	unsigned char *buffer;
-	unsigned char *nbuffer;
 
 	struct inode *inode;
 	struct super_block *sb;
@@ -581,7 +581,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 
 		buffer += s;
 
-		debugf("  - %s (number: %lld)\n", (char *) buffer, directory_entry_number);
+		debugf("  - %s (number: %lld)\n", buffer, directory_entry_number);
 		rc = node_fill(sb, directory_entry_number - 1, &enode);
 		if (rc != 0) {
 			errorf("node fill failed\n");
@@ -593,8 +593,8 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		if (filp->f_pos > (buffer - s - nbuffer) + 3) {
 			debugf("calling filldir(%p, %s, %zd, %lld, %lld, %s)\n",
 				dirent,
-				(char *) buffer,
-				strlen((char *) buffer),
+				buffer,
+				strlen(buffer),
 				filp->f_pos,
 				directory_entry_number,
 				(enode.type == smashfs_inode_type_regular_file) ? "DT_REG" :
@@ -605,8 +605,8 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 				(enode.type == smashfs_inode_type_fifo) ? "DT_FIFO" :
 				(enode.type == smashfs_inode_type_socket) ? "DT_SOCK" : "DT_UNKNOWN");
 			if (filldir(dirent,
-				    (char *) buffer,
-				    strlen((char *) buffer),
+				    buffer,
+				    strlen(buffer),
 				    filp->f_pos,
 				    directory_entry_number,
 				    (enode.type == smashfs_inode_type_regular_file) ? DT_REG :
@@ -623,9 +623,9 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 			}
 		}
 
-		buffer += strlen((char *) buffer) + 1;
+		buffer += strlen(buffer) + 1;
 		filp->f_pos += s;
-		filp->f_pos += strlen((char *) buffer) + 1;
+		filp->f_pos += strlen(buffer) + 1;
 	}
 
 	kfree(nbuffer);
@@ -639,9 +639,9 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 
 	struct node node;
 
+	char *buffer;
+	char *nbuffer;
 	struct bitbuffer bb;
-	unsigned char *buffer;
-	unsigned char *nbuffer;
 
 	struct inode *inode;
 	struct super_block *sb;
@@ -708,7 +708,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 
 		if (strlen(buffer) == dentry->d_name.len &&
 		    strncmp(buffer, dentry->d_name.name, dentry->d_name.len) == 0) {
-			debugf("  - %s (number: %lld)\n", (char *) buffer, directory_entry_number);
+			debugf("  - %s (number: %lld)\n", buffer, directory_entry_number);
 			inode = smashfs_get_inode(sb, directory_entry_number);
 			if (inode == NULL) {
 				errorf("get inode failed\n");
@@ -720,7 +720,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 			}
 		}
 
-		buffer += strlen((char *) buffer) + 1;
+		buffer += strlen(buffer) + 1;
 	}
 
 	kfree(nbuffer);
@@ -762,7 +762,6 @@ static int smashfs_readpage (struct file *file, struct page *page)
 				errorf("kmalloc failed\n");
 				goto bail;
 			}
-
 			buffer = nbuffer;
 			rc = node_read(sb, &node, node_read_symbolic_link, &buffer);
 			if (rc != 0) {
@@ -774,6 +773,7 @@ static int smashfs_readpage (struct file *file, struct page *page)
 			buffer = nbuffer;
 			memcpy(pgdata, buffer + (page->index * PAGE_CACHE_SIZE), min_t(long long, node.size, PAGE_CACHE_SIZE));
 			bytes_filled = min_t(long long, node.size, PAGE_CACHE_SIZE);
+			kfree(nbuffer);
 		} else if (node.type == smashfs_inode_type_regular_file) {
 		} else {
 			errorf("unknown node type: %lld\n", node.type);
