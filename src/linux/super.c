@@ -204,7 +204,7 @@ static struct inode * smashfs_get_inode (struct super_block *sb, long long numbe
 		return ERR_PTR(-EINVAL);
 	}
 
-	inode = iget_locked(sb, number);
+	inode = iget_locked(sb, number + 1);
 	if (inode == NULL) {
 		errorf("iget_locked failed\n");
 		leavef();
@@ -505,7 +505,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	sb = inode->i_sb;
 	sbi = sb->s_fs_info;
 
-	rc = node_fill(sb, inode->i_ino, &node);
+	rc = node_fill(sb, inode->i_ino - 1, &node);
 	if (rc != 0) {
 		errorf("node fill failed\n");
 		leavef();
@@ -528,7 +528,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		} else {
 			name = "..";
 			s = 2;
-			i_ino = 0; //parent;
+			i_ino = node.parent + 1;
 		}
 		debugf("calling filldir(%p, %s, %lld, %lld, %d, %d)\n", dirent, name, s, filp->f_pos, i_ino, DT_DIR);
 		if (filldir(dirent, name, s, filp->f_pos, i_ino, DT_DIR) < 0) {
@@ -582,7 +582,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		buffer += s;
 
 		debugf("  - %s (number: %lld)\n", (char *) buffer, directory_entry_number);
-		rc = node_fill(sb, directory_entry_number, &enode);
+		rc = node_fill(sb, directory_entry_number - 1, &enode);
 		if (rc != 0) {
 			errorf("node fill failed\n");
 			kfree(nbuffer);
@@ -660,7 +660,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	sb = dir->i_sb;
 	sbi = sb->s_fs_info;
 
-	rc = node_fill(sb, dir->i_ino, &node);
+	rc = node_fill(sb, dir->i_ino - 1, &node);
 	if (rc != 0) {
 		errorf("node fill failed\n");
 		leavef();
@@ -706,7 +706,8 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 
 		buffer += s;
 
-		if (strncmp(buffer, dentry->d_name.name, dentry->d_name.len) == 0) {
+		if (strlen(buffer) == dentry->d_name.len &&
+		    strncmp(buffer, dentry->d_name.name, dentry->d_name.len) == 0) {
 			debugf("  - %s (number: %lld)\n", (char *) buffer, directory_entry_number);
 			inode = smashfs_get_inode(sb, directory_entry_number);
 			if (inode == NULL) {
@@ -743,7 +744,7 @@ static int smashfs_readpage (struct file *file, struct page *page)
 	inode = page->mapping->host;
 	sb = inode->i_sb;
 
-	rc = node_fill(sb, inode->i_ino, &node);
+	rc = node_fill(sb, inode->i_ino - 1, &node);
 	if (rc != 0) {
 		errorf("node fill failed\n");
 		goto bail;
