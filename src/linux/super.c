@@ -520,6 +520,8 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 
 	enterf();
 
+	debugf("filp->f_pos: %lld\n", filp->f_pos);
+
 	nbuffer = NULL;
 	inode = filp->f_path.dentry->d_inode;
 	sb = inode->i_sb;
@@ -602,7 +604,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		buffer += s;
 
 		debugf("  - %s (number: %lld)\n", buffer, directory_entry_number);
-		rc = node_fill(sb, directory_entry_number - 1, &enode);
+		rc = node_fill(sb, directory_entry_number, &enode);
 		if (rc != 0) {
 			errorf("node fill failed\n");
 			kfree(nbuffer);
@@ -610,13 +612,14 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 			return -EINVAL;
 		}
 
-		if (filp->f_pos > (buffer - s - nbuffer) + 3) {
-			debugf("calling filldir(%p, %s, %zd, %lld, %lld, %s)\n",
+		debugf("    filp->f_pos: %lld, %d\n", filp->f_pos, ((buffer - s) - nbuffer) + 3);
+		if (filp->f_pos == ((buffer - s) - nbuffer) + 3) {
+			debugf("    calling filldir(%p, %s, %zd, %lld, %lld, %s)\n",
 				dirent,
 				buffer,
 				strlen(buffer),
 				filp->f_pos,
-				directory_entry_number,
+				directory_entry_number + 1,
 				(enode.type == smashfs_inode_type_regular_file) ? "DT_REG" :
 				(enode.type == smashfs_inode_type_directory) ? "DT_DIR" :
 				(enode.type == smashfs_inode_type_symbolic_link) ? "DT_LNK" :
@@ -643,9 +646,9 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 			}
 		}
 
-		buffer += strlen(buffer) + 1;
 		filp->f_pos += s;
 		filp->f_pos += strlen(buffer) + 1;
+		buffer += strlen(buffer) + 1;
 	}
 
 	kfree(nbuffer);
@@ -1046,7 +1049,8 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		goto bail;
 	}
 
-	sb->s_root = d_alloc_root(root);
+//	sb->s_root = d_alloc_root(root);
+	sb->s_root = d_make_root(root);
 	if (!sb->s_root) {
 		errorf("d_alloc_root failed\n");
 		iput(root);
