@@ -74,6 +74,7 @@ struct node {
 	long long size;
 	long long block;
 	long long index;
+	long long parent;
 };
 
 struct block {
@@ -104,6 +105,7 @@ static int node_fill (long long number, struct node *node)
 	node->size       = bitbuffer_getbits(&bitbuffer, super.bits.inode.size);
 	node->block      = bitbuffer_getbits(&bitbuffer, super.bits.inode.block);
 	node->index      = bitbuffer_getbits(&bitbuffer, super.bits.inode.index);
+	node->parent     = bitbuffer_getbits(&bitbuffer, super.bits.inode.parent);
 	bitbuffer_uninit(&bitbuffer);
 	if (super.bits.inode.group_mode == 0) {
 		node->group_mode = node->owner_mode;
@@ -537,6 +539,7 @@ int main (int argc, char *argv[])
 		fprintf(stdout, "        size      : %u\n", super.bits.inode.size);
 		fprintf(stdout, "        block     : %u\n", super.bits.inode.block);
 		fprintf(stdout, "        index     : %u\n", super.bits.inode.index);
+		fprintf(stdout, "        parent    : %u\n", super.bits.inode.parent);
 		fprintf(stdout, "        regular_file:\n");
 		fprintf(stdout, "        directory:\n");
 		fprintf(stdout, "          parent   : %u\n", super.bits.inode.directory.parent);
@@ -644,6 +647,7 @@ int main (int argc, char *argv[])
 	max_inode_size += super.bits.inode.size;
 	max_inode_size += super.bits.inode.block;
 	max_inode_size += super.bits.inode.index;
+	max_inode_size += super.bits.inode.parent;
 	max_block_size  = 0;
 	max_block_size += super.bits.block.offset;
 	max_block_size += super.bits.block.compressed_size;

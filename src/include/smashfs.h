@@ -85,6 +85,7 @@ struct smashfs_super_block {
 			uint32_t size;
 			uint32_t block;
 			uint32_t index;
+			uint32_t parent;
 			struct {
 				char content[0];
 			} regular_file;
