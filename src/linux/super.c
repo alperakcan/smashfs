@@ -37,6 +37,7 @@
 
 #include "../include/smashfs.h"
 #include "bitbuffer.h"
+#include "compressor.h"
 #include "super.h"
 
 #define errorf(a...) { \
@@ -401,13 +402,28 @@ static int node_read (struct super_block *sb, struct node *node, int (*function)
 	long long s;
 	long long i;
 	long long b;
-	void *bbuffer;
+	void *ubuffer;
+	void *cbuffer;
 	struct block block;
 	struct smashfs_super_info *sbi;
 
 	enterf();
 
 	sbi = sb->s_fs_info;
+
+	ubuffer = kmalloc(sbi->super->block_size, GFP_KERNEL);
+	if (ubuffer == NULL) {
+		errorf("malloc failed\n");
+		leavef();
+		return -1;
+	}
+	cbuffer = kmalloc(sbi->super->block_size, GFP_KERNEL);
+	if (cbuffer == NULL) {
+		errorf("malloc failed\n");
+		kfree(ubuffer);
+		leavef();
+		return -1;
+	}
 
 	s = 0;
 	i = node->index;
@@ -416,37 +432,41 @@ static int node_read (struct super_block *sb, struct node *node, int (*function)
 		rc = block_fill(sb, b, &block);
 		if (rc != 0) {
 			errorf("block fill failed\n");
-			leavef();
-			return -1;
+			goto bail;
 		}
-		bbuffer = kmalloc(block.size, GFP_KERNEL);
-		if (bbuffer == NULL) {
-			errorf("malloc failed\n");
-			leavef();
-			return -1;
+		if (block.size > sbi->super->block_size) {
+			errorf("logic error\n");
+			goto bail;
 		}
-		rc = smashfs_read(sb, bbuffer, sbi->super->entries_offset + block.offset, block.compressed_size);
+		rc = smashfs_read(sb, cbuffer, sbi->super->entries_offset + block.offset, block.compressed_size);
 		if (rc != block.compressed_size) {
 			errorf("read block failed");
-			kfree(bbuffer);
-			leavef();
-			return -1;
+			goto bail;
 		}
-		rc = function(context, bbuffer + i, min_t(long long, node->size - s, block.size - i));
+		rc = compressor_uncompress(sbi->compressor, cbuffer, block.compressed_size, ubuffer, block.size);
+		if (rc != block.size) {
+			errorf("uncompress failed");
+			goto bail;
+		}
+		rc = function(context, cbuffer + i, min_t(long long, node->size - s, block.size - i));
 		if (rc != min_t(long long, node->size - s, block.size - i)) {
 			errorf("function failed\n");
-			kfree(bbuffer);
-			leavef();
-			return -1;
+			goto bail;
 		}
-		kfree(bbuffer);
 		s += min_t(long long, node->size - s, block.size - i);
 		b += 1;
 		i = 0;
 	}
 
+	kfree(cbuffer);
+	kfree(ubuffer);
 	leavef();
 	return 0;
+bail:
+	kfree(cbuffer);
+	kfree(ubuffer);
+	leavef();
+	return -1;
 }
 
 static int node_read_directory (void *context, void *buffer, long long size)
@@ -846,6 +866,7 @@ static void smashfs_put_super (struct super_block *sb)
 	sb->s_fs_info = NULL;
 	kfree(sbi->inodes_table);
 	kfree(sbi->blocks_table);
+	compressor_destroy(sbi->compressor);
 	kfree(sbi->super);
 	kfree(sbi);
 
@@ -891,6 +912,7 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	}
 
 	sb->s_fs_info = sbi;
+	sbi->compressor = NULL;
 	sbi->blocks_table = NULL;
 	sbi->inodes_table = NULL;
 
@@ -1007,6 +1029,12 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		goto bail;
 	}
 
+	sbi->compressor = compressor_create_type(sbl->compression_type);
+	if (sbi->compressor == NULL) {
+		errorf("compressor create failed\n");
+		goto bail;
+	}
+
 	sb->s_magic = sbl->magic;
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	sb->s_flags |= MS_RDONLY;
@@ -1034,6 +1062,9 @@ bail:
 		}
 		if (sbi->inodes_table != NULL) {
 			kfree(sbi->inodes_table);
+		}
+		if (sbi->compressor != NULL) {
+			compressor_destroy(sbi->compressor);
 		}
 		kfree(sbi);
 	}

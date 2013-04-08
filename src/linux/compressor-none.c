@@ -27,15 +27,22 @@
  * either expressed or implied, of the FreeBSD Project.
  */
 
-struct smashfs_super_info {
-	int devblksize;
-	int devblksize_log2;
-	long long max_inode_size;
-	long long max_block_size;
-	struct smashfs_super_block *super;
-	unsigned char *inodes_table;
-	unsigned char *blocks_table;
-	struct compressor *compressor;
-};
+#include <linux/module.h>
 
-int smashfs_fill_super (struct super_block *sb, void *data, int silent);
+int none_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+{
+	if (dsize < ssize) {
+		return -1;
+	}
+	memcpy(dst, src, ssize);
+	return ssize;
+}
+
+int none_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+{
+	if (dsize < ssize) {
+		return -1;
+	}
+	memcpy(dst, src, ssize);
+	return ssize;
+}

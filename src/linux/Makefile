@@ -9,6 +9,10 @@ obj-m := ${MOD_NAME}.o
 ${MOD_NAME}-objs  = fs.o
 ${MOD_NAME}-objs += super.o
 ${MOD_NAME}-objs += bitbuffer.o
+${MOD_NAME}-objs += compressor.o
+${MOD_NAME}-objs += compressor-none.o
+${MOD_NAME}-objs += compressor-gzip.o
+${MOD_NAME}-objs += compressor-lzma.o
 
 cflags-y  = -I${SUBDIRS}/../include
 

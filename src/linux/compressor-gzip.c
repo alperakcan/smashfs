@@ -27,15 +27,53 @@
  * either expressed or implied, of the FreeBSD Project.
  */
 
-struct smashfs_super_info {
-	int devblksize;
-	int devblksize_log2;
-	long long max_inode_size;
-	long long max_block_size;
-	struct smashfs_super_block *super;
-	unsigned char *inodes_table;
-	unsigned char *blocks_table;
-	struct compressor *compressor;
-};
+#include <linux/module.h>
+#include <linux/vmalloc.h>
+#include <linux/zlib.h>
 
-int smashfs_fill_super (struct super_block *sb, void *data, int silent);
+int gzip_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+{
+	(void) src;
+	(void) ssize;
+	(void) dst;
+	(void) dsize;
+	return -1;
+}
+
+int gzip_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+{
+	int rc;
+	z_stream stream;
+
+	stream.workspace = vmalloc(zlib_inflate_workspacesize());
+	if (!stream.workspace ) {
+		return -1;
+	}
+
+	stream.next_in = NULL;
+	stream.avail_in = 0;
+	zlib_inflateInit2(&stream, -MAX_WBITS);
+
+	stream.next_in = src;
+	stream.avail_in = ssize;
+
+	stream.next_out = dst;
+	stream.avail_out = dsize;
+
+	rc = zlib_inflateReset(&stream);
+	if (rc != Z_OK) {
+		zlib_inflateEnd(&stream);
+		zlib_inflateInit(&stream);
+	}
+
+	rc = zlib_inflate(&stream, Z_FINISH);
+	if (rc != Z_STREAM_END) {
+		zlib_inflateEnd(&stream);
+		vfree(stream.workspace);
+		return -1;
+	}
+
+	zlib_inflateEnd(&stream);
+	vfree(stream.workspace);
+	return stream.total_out;
+}
