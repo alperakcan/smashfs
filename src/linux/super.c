@@ -461,6 +461,20 @@ static int node_read_directory (void *context, void *buffer, long long size)
 	return size;
 }
 
+static int node_read_symbolic_link (void *context, void *buffer, long long size)
+{
+	unsigned char **b;
+
+	enterf();
+
+	b = context;
+	memcpy(*b, buffer, size);
+	*b += size;
+
+	leavef();
+	return size;
+}
+
 static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 {
 	int rc;
@@ -713,9 +727,64 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 
 static int smashfs_readpage (struct file *file, struct page *page)
 {
+	int rc;
+	int bytes_filled;
+	int max_block;
 	void *pgdata;
+	char *buffer;
+	char *nbuffer;
+	struct node node;
+	struct inode *inode;
+	struct super_block *sb;
 	enterf();
+
+	inode = page->mapping->host;
+	sb = inode->i_sb;
+
+	rc = node_fill(sb, inode->i_ino, &node);
+	if (rc != 0) {
+		errorf("node fill failed\n");
+		goto bail;
+	}
+
+	max_block = (inode->i_size + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
+	bytes_filled = 0;
 	pgdata = kmap(page);
+
+	debugf("page index: %ld, node size: %lld, max block: %d\n", page->index, node.size, max_block);
+	if (page->index < max_block) {
+		if (node.type == smashfs_inode_type_symbolic_link) {
+			nbuffer = kmalloc(node.size, GFP_KERNEL);
+			if (nbuffer == NULL) {
+				errorf("kmalloc failed\n");
+				goto bail;
+			}
+
+			buffer = nbuffer;
+			rc = node_read(sb, &node, node_read_symbolic_link, &buffer);
+			if (rc != 0) {
+				errorf("node read failed\n");
+				kfree(nbuffer);
+				leavef();
+				goto bail;
+			}
+			buffer = nbuffer;
+			memcpy(pgdata, buffer + (page->index * PAGE_CACHE_SIZE), min_t(long long, node.size, PAGE_CACHE_SIZE));
+			bytes_filled = min_t(long long, node.size, PAGE_CACHE_SIZE);
+		} else if (node.type == smashfs_inode_type_regular_file) {
+		} else {
+			errorf("unknown node type: %lld\n", node.type);
+			goto bail;
+		}
+	}
+
+	memset(pgdata + bytes_filled, 0, PAGE_CACHE_SIZE - bytes_filled);
+	flush_dcache_page(page);
+	kunmap(page);
+	SetPageUptodate(page);
+	unlock_page(page);
+	return 0;
+bail:
 	kunmap(page);
 	ClearPageUptodate(page);
 	SetPageError(page);
