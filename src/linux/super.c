@@ -711,7 +711,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	return ERR_PTR(-EINVAL);
 }
 
-static int smashfs_readpage(struct file *file, struct page *page)
+static int smashfs_readpage (struct file *file, struct page *page)
 {
 	void *pgdata;
 	enterf();
@@ -728,7 +728,9 @@ static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
 {
 	u64 id;
 	struct smashfs_super_info *sbi;
+
 	enterf();
+
 	sbi = dentry->d_sb->s_fs_info;
 	id = huge_encode_dev(dentry->d_sb->s_bdev->bd_dev);
 	buf->f_type = SMASHFS_MAGIC;
@@ -741,6 +743,7 @@ static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
 	buf->f_namelen = SMASHFS_NAME_LEN;
 	buf->f_fsid.val[0] = (u32) id;
 	buf->f_fsid.val[1] = (u32) (id >> 32);
+
 	leavef();
 	return 0;
 }
@@ -748,7 +751,9 @@ static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
 static int smashfs_remount (struct super_block *sb, int *flags, char *data)
 {
 	enterf();
+
 	*flags |= MS_RDONLY;
+
 	leavef();
 	return 0;
 }
@@ -757,7 +762,9 @@ static int smashfs_remount (struct super_block *sb, int *flags, char *data)
 static void smashfs_put_super (struct super_block *sb)
 {
 	struct smashfs_super_info *sbi;
+
 	enterf();
+
 	if (sb->s_fs_info == NULL) {
 		debugf("sb->s_fs_info is null\n");
 		leavef();
@@ -769,6 +776,7 @@ static void smashfs_put_super (struct super_block *sb)
 	kfree(sbi->blocks_table);
 	kfree(sbi->super);
 	kfree(sbi);
+
 	leavef();
 }
 
@@ -799,7 +807,9 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	struct inode *root;
 	struct smashfs_super_info *sbi;
 	struct smashfs_super_block *sbl;
+
 	enterf();
+
 	sbi = NULL;
 	sbl = NULL;
 	sbi = kmalloc(sizeof(struct smashfs_super_info), GFP_KERNEL);
@@ -807,28 +817,36 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		errorf("kalloc failed for super info\n");
 		goto bail;
 	}
+
+	sb->s_fs_info = sbi;
 	sbi->blocks_table = NULL;
 	sbi->inodes_table = NULL;
-	sb->s_fs_info = sbi;
+
 	debugf("devname: %s\n", bdevname(sb->s_bdev, b));
+
 	sbi->devblksize = sb_min_blocksize(sb, BLOCK_SIZE);
 	sbi->devblksize_log2 = ffz(~sbi->devblksize);
+
 	debugf("dev block size: %d, log2: %d", sbi->devblksize, sbi->devblksize_log2);
+
 	sbl = kmalloc(sizeof(struct smashfs_super_block), GFP_KERNEL);
 	if (sbl == NULL) {
 		errorf("kalloc failed for super block\n");
 		goto bail;
 	}
 	sbi->super = sbl;
+
 	rc = smashfs_read(sb, sbl, SMASHFS_START, sizeof(struct smashfs_super_block));
 	if (rc != sizeof(struct smashfs_super_block)) {
 		errorf("could not read super block\n");
 		goto bail;
 	}
+
 	if (sbl->magic != SMASHFS_MAGIC) {
 		errorf("magic mismatch\n");
 		goto bail;
 	}
+
 	debugf("super block:\n");
 	debugf("  magic         : 0x%08x, %u\n", sbl->magic, sbl->magic);
 	debugf("  version       : 0x%08x, %u\n", sbl->version, sbl->version);
@@ -874,6 +892,7 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	debugf("      offset         : %u\n", sbl->bits.block.offset);
 	debugf("      compressed_size: %u\n", sbl->bits.block.compressed_size);
 	debugf("      size           : %u\n", sbl->bits.block.size);
+
 	sbi->max_inode_size  = 0;
 	sbi->max_inode_size += sbl->bits.inode.type;
 	sbi->max_inode_size += sbl->bits.inode.owner_mode;
@@ -886,46 +905,53 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	sbi->max_inode_size += sbl->bits.inode.size;
 	sbi->max_inode_size += sbl->bits.inode.block;
 	sbi->max_inode_size += sbl->bits.inode.index;
+
 	sbi->inodes_table = kmalloc(sbl->inodes_size, GFP_KERNEL);
 	if (sbi->inodes_table == NULL) {
 		errorf("kmalloc failed for inodes table\n");
 		goto bail;
 	}
+
 	sbi->max_block_size  = 0;
 	sbi->max_block_size += sbl->bits.block.offset;
 	sbi->max_block_size += sbl->bits.block.compressed_size;
 	sbi->blocks_table = kmalloc(sbl->blocks_size, GFP_KERNEL);
+
 	if (sbi->blocks_table == NULL) {
 		errorf("kmalloc failed for blocks table\n");
 		goto bail;
 	}
+
 	rc = smashfs_read(sb, sbi->inodes_table, sbl->inodes_offset, sbl->inodes_size);
 	if (rc != sbl->inodes_size) {
 		errorf("read failed for inodes table\n");
 		goto bail;
 	}
-	debugf("inodes table\n");
-	debugf("  0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n", sbi->inodes_table[0], sbi->inodes_table[1], sbi->inodes_table[2], sbi->inodes_table[3], sbi->inodes_table[4], sbi->inodes_table[5], sbi->inodes_table[6], sbi->inodes_table[7]);
+
 	rc = smashfs_read(sb, sbi->blocks_table, sbl->blocks_offset, sbl->blocks_size);
 	if (rc != sbl->blocks_size) {
 		errorf("read failed for blocks table\n");
 		goto bail;
 	}
+
 	sb->s_magic = sbl->magic;
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	sb->s_flags |= MS_RDONLY;
 	sb->s_op = &smashfs_super_ops;
+
 	root = smashfs_get_inode(sb, sbl->root);
 	if (IS_ERR(root)) {
 		errorf("can not get root inode\n");
 		goto bail;
 	}
+
 	sb->s_root = d_alloc_root(root);
 	if (!sb->s_root) {
 		errorf("d_alloc_root failed\n");
 		iput(root);
 		goto bail;
 	}
+
 	leavef();
 	return 0;
 bail:
