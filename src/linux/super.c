@@ -338,23 +338,27 @@ static int node_read (struct super_block *sb, struct node *node, int (*function)
 		rc = block_fill(sb, b, &block);
 		if (rc != 0) {
 			errorf("block fill failed\n");
+			leavef();
 			return -1;
 		}
 		bbuffer = kmalloc(block.size, GFP_KERNEL);
 		if (bbuffer == NULL) {
 			errorf("malloc failed\n");
+			leavef();
 			return -1;
 		}
 		rc = smashfs_read(sb, bbuffer, sbi->super->entries_offset + block.offset, block.compressed_size);
 		if (rc != block.compressed_size) {
 			errorf("read block failed");
 			kfree(bbuffer);
+			leavef();
 			return -1;
 		}
 		rc = function(context, bbuffer + i, MIN(node->size - s, block.size - i));
 		if (rc != MIN(node->size - s, block.size - i)) {
 			errorf("function failed\n");
 			kfree(bbuffer);
+			leavef();
 			return -1;
 		}
 		kfree(bbuffer);
@@ -362,15 +366,18 @@ static int node_read (struct super_block *sb, struct node *node, int (*function)
 		b += 1;
 		i = 0;
 	}
+	leavef();
 	return 0;
 }
 
 static int node_read_directory (void *context, void *buffer, long long size)
 {
 	unsigned char **b;
+	enterf();
 	b = context;
 	memcpy(*b, buffer, size);
 	*b += size;
+	leavef();
 	return size;
 }
 
@@ -380,6 +387,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	long long size;
 	struct inode *inode;
 	struct node node;
+	struct node enode;
 	struct super_block *sb;
 	struct smashfs_super_info *sbi;
 	unsigned char *buffer;
@@ -460,8 +468,24 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		bitbuffer_uninit(&bb);
 		buffer += s;
 		debugf("  - %s (number: %lld)\n", (char *) buffer, directory_entry_number);
-		debugf("calling filldir(%p, %s, %zd, %lld, %lld, %d)\n", dirent, (char *) buffer, strlen((char *) buffer), filp->f_pos, directory_entry_number, DT_DIR);
-		if (filldir(dirent, (char *) buffer, strlen((char *) buffer), filp->f_pos, directory_entry_number, DT_DIR) < 0) {
+		rc = node_fill(sb, directory_entry_number, &enode);
+		if (rc != 0) {
+			errorf("node fill failed\n");
+			goto finish;
+		}
+		debugf("calling filldir(%p, %s, %zd, %lld, %lld, %d)\n", dirent, (char *) buffer, strlen((char *) buffer), filp->f_pos, directory_entry_number, (enode.type == smashfs_inode_type_regular_file) ? DT_REG : (enode.type == smashfs_inode_type_directory) ? DT_DIR : (enode.type == smashfs_inode_type_symbolic_link) ? DT_LNK : (enode.type == smashfs_inode_type_character_device) ? DT_CHR : (enode.type == smashfs_inode_type_block_device) ? DT_BLK : (enode.type == smashfs_inode_type_fifo) ? DT_FIFO : (enode.type == smashfs_inode_type_socket) ? DT_SOCK : DT_UNKNOWN);
+		if (filldir(dirent,
+			    (char *) buffer,
+			    strlen((char *) buffer),
+			    filp->f_pos,
+			    directory_entry_number,
+			    (enode.type == smashfs_inode_type_regular_file) ? DT_REG :
+			    (enode.type == smashfs_inode_type_directory) ? DT_DIR :
+			    (enode.type == smashfs_inode_type_symbolic_link) ? DT_LNK :
+			    (enode.type == smashfs_inode_type_character_device) ? DT_CHR :
+			    (enode.type == smashfs_inode_type_block_device) ? DT_BLK :
+			    (enode.type == smashfs_inode_type_fifo) ? DT_FIFO :
+			    (enode.type == smashfs_inode_type_socket) ? DT_SOCK : DT_UNKNOWN) < 0) {
 			errorf("filldir failed\n");
 			goto finish;
 		}
@@ -540,8 +564,8 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 		directory_entry_number = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.number);
 		bitbuffer_uninit(&bb);
 		buffer += s;
-		debugf("  - %s (number: %lld)\n", (char *) buffer, directory_entry_number);
 		if (strncmp(buffer, dentry->d_name.name, dentry->d_name.len) == 0) {
+			debugf("  - %s (number: %lld)\n", (char *) buffer, directory_entry_number);
 			inode = smashfs_get_inode(sb, directory_entry_number);
 			if (inode == NULL) {
 				errorf("get inode failed\n");
@@ -563,7 +587,13 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 
 static int smashfs_readpage(struct file *file, struct page *page)
 {
+	void *pgdata;
 	enterf();
+	pgdata = kmap(page);
+	kunmap(page);
+	ClearPageUptodate(page);
+	SetPageError(page);
+	unlock_page(page);
 	leavef();
 	return 0;
 }
@@ -615,6 +645,10 @@ static struct inode * smashfs_get_inode (struct super_block *sb, long long numbe
 	} else if (node.type == smashfs_inode_type_regular_file) {
 		mode                = S_IFREG;
 		inode->i_fop        = &generic_ro_fops;
+		inode->i_data.a_ops = &smashfs_aops;
+	} else if (node.type == smashfs_inode_type_symbolic_link) {
+		mode                = S_IFLNK;
+		inode->i_op         = &page_symlink_inode_operations;
 		inode->i_data.a_ops = &smashfs_aops;
 	} else {
 		errorf("unknown node type: %lld\n", node.type);
@@ -790,7 +824,7 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		errorf("can not get root inode\n");
 		goto bail;
 	}
-	sb->s_root = d_make_root(root);
+	sb->s_root = d_alloc_root(root);
 	if (!sb->s_root) {
 		errorf("d_alloc_root failed\n");
 		iput(root);
