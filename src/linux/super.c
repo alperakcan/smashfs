@@ -74,6 +74,7 @@ struct node {
 	long long size;
 	long long block;
 	long long index;
+	long long parent;
 };
 
 static const struct super_operations smashfs_super_ops;
@@ -152,6 +153,7 @@ static int node_fill (struct super_block *sb, long long number, struct node *nod
 	node->size       = bitbuffer_getbits(&bb, sbi->super->bits.inode.size);
 	node->block      = bitbuffer_getbits(&bb, sbi->super->bits.inode.block);
 	node->index      = bitbuffer_getbits(&bb, sbi->super->bits.inode.index);
+	node->parent     = bitbuffer_getbits(&bb, sbi->super->bits.inode.parent);
 	bitbuffer_uninit(&bb);
 
 	if (sbi->super->bits.inode.group_mode == 0) {
@@ -974,6 +976,7 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	sbi->max_inode_size += sbl->bits.inode.size;
 	sbi->max_inode_size += sbl->bits.inode.block;
 	sbi->max_inode_size += sbl->bits.inode.index;
+	sbi->max_inode_size += sbl->bits.inode.parent;
 
 	sbi->inodes_table = kmalloc(sbl->inodes_size, GFP_KERNEL);
 	if (sbi->inodes_table == NULL) {
