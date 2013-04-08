@@ -102,6 +102,7 @@ struct node {
 	long long size;
 	long long block;
 	long long index;
+	long long parent;
 	union {
 		void *pointer;
 		struct node_regular_file *regular_file;
@@ -237,6 +238,7 @@ static int output_write (void)
 	long long max_inode_mtime;
 	long long max_inode_block;
 	long long max_inode_index;
+	long long max_inode_parent;
 
 	long long max_inode_directory_parent;
 	long long max_inode_directory_nentries;
@@ -282,6 +284,7 @@ static int output_write (void)
 	max_inode_gid        = -1;
 	max_inode_ctime      = -1;
 	max_inode_mtime      = -1;
+	max_inode_parent     = -1;
 
 	max_inode_directory_parent       = -1;
 	max_inode_directory_nentries     = -1;
@@ -297,6 +300,7 @@ static int output_write (void)
 		max_inode_gid        = MAX(max_inode_gid, node->gid);
 		max_inode_ctime      = MAX(max_inode_ctime, node->ctime);
 		max_inode_mtime      = MAX(max_inode_mtime, node->mtime);
+		max_inode_parent     = MAX(max_inode_parent, node->parent);
 		min_inode_ctime      = MIN(max_inode_ctime, min_inode_ctime);
 		min_inode_mtime      = MIN(max_inode_mtime, min_inode_mtime);
 		if (node->type == smashfs_inode_type_regular_file) {
@@ -343,6 +347,7 @@ static int output_write (void)
 	super.bits.inode.gid        = blog(max_inode_gid);
 	super.bits.inode.ctime      = blog(max_inode_ctime - min_inode_ctime);
 	super.bits.inode.mtime      = blog(max_inode_mtime - min_inode_mtime);
+	super.bits.inode.parent     = blog(max_inode_parent);
 
 	super.bits.inode.directory.parent         = blog(max_inode_directory_parent);
 	super.bits.inode.directory.nentries       = blog(max_inode_directory_nentries);
@@ -554,6 +559,7 @@ static int output_write (void)
 	max_inode_size += super.bits.inode.size;
 	max_inode_size += super.bits.inode.block;
 	max_inode_size += super.bits.inode.index;
+	max_inode_size += super.bits.inode.parent;
 	size = (super.inodes * max_inode_size + 7) / 8;
 
 	fprintf(stdout, "  sorting inodes table by number\n");
@@ -579,6 +585,7 @@ static int output_write (void)
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.size      , node->size);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.block     , node->block);
 		bitbuffer_putbits(&bitbuffer, super.bits.inode.index     , node->index);
+		bitbuffer_putbits(&bitbuffer, super.bits.inode.parent    , node->parent);
 		if (debug > 2) {
 			fprintf(stdout, "    node: %lld, size: %lld, block: %lld, index: %lld\n", node->number, node->size, node->block, node->index);
 		}
@@ -661,6 +668,7 @@ static int output_write (void)
 		fprintf(stdout, "        size      : %u\n", super.bits.inode.size);
 		fprintf(stdout, "        block     : %u\n", super.bits.inode.block);
 		fprintf(stdout, "        index     : %u\n", super.bits.inode.index);
+		fprintf(stdout, "        parent    : %u\n", super.bits.inode.parent);
 		fprintf(stdout, "        regular_file:\n");
 		fprintf(stdout, "        directory:\n");
 		fprintf(stdout, "          parent   : %u\n", super.bits.inode.directory.parent);
@@ -777,6 +785,7 @@ static struct node * node_new (FTSENT *entry)
 	}
 	entry->fts_pointer = node;
 	node->number = nodes_id;
+	node->parent = 0;
 	node->pointer = NULL;
 	if (S_ISREG(stbuf->st_mode)) {
 		node->type = smashfs_inode_type_regular_file;
@@ -950,6 +959,7 @@ static struct node * node_new (FTSENT *entry)
 	directory->nentries += 1;
 	free(parent->directory);
 	parent->directory = directory;
+	node->parent = parent->number;
 out:
 	if (duplicate == 0) {
 		HASH_ADD(hh, nodes_table, number, sizeof(node->number), node);
