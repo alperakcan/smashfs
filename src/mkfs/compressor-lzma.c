@@ -42,7 +42,6 @@
 
 int lzma_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
-	unsigned char *d = (unsigned char *) dst;
 	lzma_options_lzma opt;
 	lzma_stream strm = LZMA_STREAM_INIT;
 	int res;
@@ -68,14 +67,19 @@ int lzma_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 		fprintf(stderr, "lzma_code failed\n");
 		goto bail;
 	}
-	d[LZMA_PROPS_SIZE] = ssize & 255;
-	d[LZMA_PROPS_SIZE + 1] = (ssize >> 8) & 255;
-	d[LZMA_PROPS_SIZE + 2] = (ssize >> 16) & 255;
-	d[LZMA_PROPS_SIZE + 3] = (ssize >> 24) & 255;
-	d[LZMA_PROPS_SIZE + 4] = 0;
-	d[LZMA_PROPS_SIZE + 5] = 0;
-	d[LZMA_PROPS_SIZE + 6] = 0;
-	d[LZMA_PROPS_SIZE + 7] = 0;
+#if 0
+	{
+		unsigned char *d = (unsigned char *) dst;
+		d[LZMA_PROPS_SIZE] = ssize & 255;
+		d[LZMA_PROPS_SIZE + 1] = (ssize >> 8) & 255;
+		d[LZMA_PROPS_SIZE + 2] = (ssize >> 16) & 255;
+		d[LZMA_PROPS_SIZE + 3] = (ssize >> 24) & 255;
+		d[LZMA_PROPS_SIZE + 4] = 0;
+		d[LZMA_PROPS_SIZE + 5] = 0;
+		d[LZMA_PROPS_SIZE + 6] = 0;
+		d[LZMA_PROPS_SIZE + 7] = 0;
+	}
+#endif
 	return (int) strm.total_out;
 bail:	return -1;
 }
@@ -84,27 +88,36 @@ int lzma_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsiz
 {
 	int rc;
 	lzma_stream strm = LZMA_STREAM_INIT;
-	unsigned char lzma_header[LZMA_HEADER_SIZE];
 	rc = lzma_alone_decoder(&strm, MEMLIMIT);
 	if(rc != LZMA_OK) {
 		fprintf(stderr, "lzma_alone_encoder failed\n");
 		lzma_end(&strm);
 		goto bail;
 	}
-	memcpy(lzma_header, src, LZMA_HEADER_SIZE);
-	memset(lzma_header + LZMA_PROPS_SIZE, 255, LZMA_UNCOMP_SIZE);
+#if 0
+	{
+		unsigned char lzma_header[LZMA_HEADER_SIZE];
+		memcpy(lzma_header, src, LZMA_HEADER_SIZE);
+		memset(lzma_header + LZMA_PROPS_SIZE, 255, LZMA_UNCOMP_SIZE);
+		strm.next_out = dst;
+		strm.avail_out = dsize;
+		strm.next_in = lzma_header;
+		strm.avail_in = LZMA_HEADER_SIZE;
+		rc = lzma_code(&strm, LZMA_RUN);
+		if (rc != LZMA_OK || strm.avail_in != 0) {
+			fprintf(stderr, "lzma_alone_encoder failed\n");
+			lzma_end(&strm);
+			goto bail;
+		}
+		strm.next_in = src + LZMA_HEADER_SIZE;
+		strm.avail_in = ssize - LZMA_HEADER_SIZE;
+	}
+#else
 	strm.next_out = dst;
 	strm.avail_out = dsize;
-	strm.next_in = lzma_header;
-	strm.avail_in = LZMA_HEADER_SIZE;
-	rc = lzma_code(&strm, LZMA_RUN);
-	if (rc != LZMA_OK || strm.avail_in != 0) {
-		fprintf(stderr, "lzma_alone_encoder failed\n");
-		lzma_end(&strm);
-		goto bail;
-	}
-	strm.next_in = src + LZMA_HEADER_SIZE;
-	strm.avail_in = ssize - LZMA_HEADER_SIZE;
+	strm.next_in = src;
+	strm.avail_in = ssize;
+#endif
 	rc = lzma_code(&strm, LZMA_FINISH);
 	lzma_end(&strm);
 	if (rc == LZMA_STREAM_END) {
