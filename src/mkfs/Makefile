@@ -15,6 +15,9 @@ mkfs.smashfs_files-y = \
 	compressor-lzma.c \
 	compressor-lzo.c
 
+mkfs.smashfs_cflags-y += \
+	-U_FILE_OFFSET_BITS
+
 mkfs.smashfs_cflags-${SMASHFS_ENABLE_XZ} += \
 	-DSMASHFS_ENABLE_XZ=1
 
@@ -29,9 +32,6 @@ mkfs.smashfs_ldflags-y = \
 	-llzma \
 	-llzo2
 
-mkfs.smashfs_cflags-y = \
-	-U_FILE_OFFSET_BITS
-
 unfs.smashfs_files-y = \
 	unfs.c \
 	buffer.c \
@@ -42,7 +42,7 @@ unfs.smashfs_files-y = \
 	compressor-lzma.c \
 	compressor-lzo.c
 
-unfs.smashfs_cflags-y = \
+unfs.smashfs_cflags-y += \
 	-U_FILE_OFFSET_BITS
 
 unfs.smashfs_cflags-${SMASHFS_ENABLE_XZ} += \
