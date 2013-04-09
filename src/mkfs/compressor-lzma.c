@@ -31,10 +31,6 @@
 #include <string.h>
 #include <lzma.h>
 
-#define LZMA_PROPS_SIZE		5
-#define LZMA_UNCOMP_SIZE	8
-#define LZMA_HEADER_SIZE	(LZMA_PROPS_SIZE + LZMA_UNCOMP_SIZE)
-
 #define LZMA_OPTIONS		9
 #define MEMLIMIT		(256 * 1024 * 1024)
 
@@ -42,13 +38,9 @@
 
 int lzma_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
+	int res;
 	lzma_options_lzma opt;
 	lzma_stream strm = LZMA_STREAM_INIT;
-	int res;
-	if (ssize + LZMA_HEADER_SIZE > dsize) {
-		fprintf(stderr, "not enough space\n");
-		goto bail;
-	}
 	lzma_lzma_preset(&opt, LZMA_OPTIONS);
 	opt.dict_size = MAX(4096, ssize);
 	res = lzma_alone_encoder(&strm, &opt);
