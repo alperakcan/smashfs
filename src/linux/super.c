@@ -34,6 +34,7 @@
 #include <linux/buffer_head.h>
 #include <linux/statfs.h>
 #include <linux/namei.h>
+#include <linux/version.h>
 
 #include "../include/smashfs.h"
 #include "bitbuffer.h"
@@ -612,7 +613,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 			return -EINVAL;
 		}
 
-		debugf("    filp->f_pos: %lld, %d\n", filp->f_pos, ((buffer - s) - nbuffer) + 3);
+		debugf("    filp->f_pos: %lld, %zd\n", filp->f_pos, ((buffer - s) - nbuffer) + 3);
 		if (filp->f_pos == ((buffer - s) - nbuffer) + 3) {
 			debugf("    calling filldir(%p, %s, %zd, %lld, %lld, %s)\n",
 				dirent,
@@ -1049,8 +1050,11 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		goto bail;
 	}
 
-//	sb->s_root = d_alloc_root(root);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,4,0)
+	sb->s_root = d_alloc_root(root);
+#else
 	sb->s_root = d_make_root(root);
+#endif
 	if (!sb->s_root) {
 		errorf("d_alloc_root failed\n");
 		iput(root);
