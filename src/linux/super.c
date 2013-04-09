@@ -651,7 +651,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 				    (enode.type == smashfs_inode_type_block_device) ? DT_BLK :
 				    (enode.type == smashfs_inode_type_fifo) ? DT_FIFO :
 				    (enode.type == smashfs_inode_type_socket) ? DT_SOCK : DT_UNKNOWN) < 0) {
-				errorf("filldir failed\n");
+				debugf("filldir failed\n");
 				kfree(nbuffer);
 				leavef();
 				return 0;
