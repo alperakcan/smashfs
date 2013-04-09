@@ -387,7 +387,7 @@ static int smashfs_read (struct super_block *sb, void *buffer, int offset, int l
 	return length;
 }
 
-static int node_read (struct super_block *sb, struct node *node, int (*function) (void *context, void *buffer, long long size), void *context)
+static int node_read (struct super_block *sb, struct node *node, int (*function) (void *context, void *buffer, long long size), void *context, long long offset, long long size)
 {
 	int rc;
 	long long s;
@@ -399,6 +399,7 @@ static int node_read (struct super_block *sb, struct node *node, int (*function)
 	struct smashfs_super_info *sbi;
 
 	enterf();
+	debugf("offset: %lld, size: %lld\n", offset, size);
 
 	sbi = sb->s_fs_info;
 
@@ -574,7 +575,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	}
 
 	buffer = nbuffer;
-	rc = node_read(sb, &node, node_read_directory, &buffer);
+	rc = node_read(sb, &node, node_read_directory, &buffer, 0, node.size);
 	if (rc != 0) {
 		errorf("node read failed\n");
 		kfree(nbuffer);
@@ -703,7 +704,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	}
 
 	buffer = nbuffer;
-	rc = node_read(sb, &node, node_read_directory, &buffer);
+	rc = node_read(sb, &node, node_read_directory, &buffer, 0, node.size);
 	if (rc != 0) {
 		errorf("node read failed\n");
 		kfree(nbuffer);
@@ -792,7 +793,7 @@ static int smashfs_readpage (struct file *file, struct page *page)
 				goto bail;
 			}
 			buffer = nbuffer;
-			rc = node_read(sb, &node, node_read_symbolic_link, &buffer);
+			rc = node_read(sb, &node, node_read_symbolic_link, &buffer, 0, node.size);
 			if (rc != 0) {
 				errorf("node read failed\n");
 				kfree(nbuffer);
@@ -810,7 +811,7 @@ static int smashfs_readpage (struct file *file, struct page *page)
 				goto bail;
 			}
 			buffer = nbuffer;
-			rc = node_read(sb, &node, node_read_regular_file, &buffer);
+			rc = node_read(sb, &node, node_read_regular_file, &buffer, 0, node.size);
 			if (rc != 0) {
 				errorf("node read failed\n");
 				kfree(nbuffer);
