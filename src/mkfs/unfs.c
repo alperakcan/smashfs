@@ -38,7 +38,7 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include "../include/smashfs.h"
+#include "smashfs.h"
 
 #include "uthash.h"
 #include "buffer.h"

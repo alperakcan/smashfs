@@ -42,7 +42,9 @@
 
 #include <sys/queue.h>
 
-#include "../include/smashfs.h"
+#include <pthread.h>
+
+#include "smashfs.h"
 
 #include "uthash.h"
 #include "buffer.h"
@@ -118,6 +120,9 @@ struct block {
 	long long offset;
 	long long size;
 	long long compressed_size;
+	void *buffer;
+	void *cbuffer;
+	int status;
 };
 
 static LIST_HEAD(sources, source) sources;
@@ -132,6 +137,11 @@ static struct node *nodes_table			= NULL;
 static int debug				= 0;
 static char *output				= NULL;
 static unsigned int block_size			= 1024 * 1024;
+
+#define MAX_JOBS				16
+static unsigned int njobs			= 8;
+static pthread_t jobs[MAX_JOBS]			= { 0 };
+static pthread_mutex_t job_mutex                = PTHREAD_MUTEX_INITIALIZER;
 
 static int no_group_mode			= 0;
 static int no_other_mode			= 0;
@@ -201,6 +211,39 @@ static int nodes_sort_by_type (struct node *a, struct node *b)
 #endif
 }
 
+struct job_arg {
+	unsigned int nblocks;
+	struct block *blocks;
+};
+
+static void * job (void *arg)
+{
+	ssize_t rc;
+	unsigned int b;
+	struct job_arg *ja;
+	ja = arg;
+	for (b = 0; b < ja->nblocks; b++) {
+		pthread_mutex_lock(&job_mutex);
+		if (ja->blocks[b].status != 0) {
+			pthread_mutex_unlock(&job_mutex);
+			continue;
+		}
+		ja->blocks[b].status = 1;
+		pthread_mutex_unlock(&job_mutex);
+		rc = compressor_compress(compressor, ja->blocks[b].buffer, ja->blocks[b].size, ja->blocks[b].cbuffer, ja->blocks[b].size * 2);
+		if (rc < 0) {
+			fprintf(stderr, "compress failed\n");
+			goto bail;
+		}
+		ja->blocks[b].compressed_size = rc;
+		pthread_mutex_lock(&job_mutex);
+		ja->blocks[b].status = 2;
+		pthread_mutex_unlock(&job_mutex);
+	}
+bail:
+	return NULL;
+}
+
 static int output_write (void)
 {
 	int fd;
@@ -259,6 +302,8 @@ static int output_write (void)
 	struct buffer inode_cbuffer;
 	struct buffer entry_cbuffer;
 	struct bitbuffer bitbuffer;
+
+	struct job_arg job_arg;
 
 	fd = -1;
 	bc = NULL;
@@ -475,6 +520,7 @@ static int output_write (void)
 		fprintf(stderr, "malloc failed\n");
 		goto bail;
 	}
+	memset(blocks, 0, super.blocks * sizeof(struct block));
 	bc = malloc(super.block_size * 2);
 	if (bc == NULL) {
 		fprintf(stderr, "malloc failed\n");
@@ -482,25 +528,54 @@ static int output_write (void)
 	}
 	buffer_init(&entry_cbuffer);
 	bb = buffer_buffer(&entry_buffer);
-	max_block_offset = 0;
 	for (b = 0; b < super.blocks; b++) {
 		if (debug > 1) {
-			fprintf(stdout, "    compressing block: %d\n", b);
+			fprintf(stdout, "    compressing block: %d (1/3)\n", b);
 		}
-		blocks[b].offset = max_block_offset;
 		blocks[b].size = MIN(super.block_size, buffer_length(&entry_buffer) - (bb - ((unsigned char *) buffer_buffer(&entry_buffer))));
-		rc = compressor_compress(compressor, bb, blocks[b].size, bc, super.block_size * 2);
-		if (rc < 0) {
-			fprintf(stderr, "compress failed\n");
-			goto bail;
-		}
-		blocks[b].compressed_size = rc;
-		if (buffer_add(&entry_cbuffer, bc, rc) != rc) {
-			fprintf(stderr, "buffer add failed\n");
+		blocks[b].buffer = bb;
+		blocks[b].cbuffer = malloc(blocks[b].size * 2);
+		if (blocks[b].cbuffer == NULL) {
+			fprintf(stderr, "malloc failed\n");
 			goto bail;
 		}
 		bb += super.block_size;
+	}
+	job_arg.nblocks = super.blocks;
+	job_arg.blocks = blocks;
+	fprintf(stdout, "  compressing with %d job%s\n", njobs, (njobs > 1) ? "s" : "");
+	for (b = 0; b < njobs; b++) {
+		rc = pthread_create(&jobs[b], NULL, job, &job_arg);
+		if (rc != 0) {
+			fprintf(stderr, "job create failed\n");
+			goto bail;
+		}
+	}
+	for (b = 0; b < njobs; b++) {
+		rc = pthread_join(jobs[b], NULL);
+		if (rc != 0) {
+			fprintf(stderr, "job join failed\n");
+			goto bail;
+		}
+	}
+	max_block_offset = 0;
+	for (b = 0; b < super.blocks; b++) {
+		if (debug > 1) {
+			fprintf(stdout, "    compressing block: %d (3/3)\n", b);
+		}
+		blocks[b].offset = max_block_offset;
+		rc = buffer_add(&entry_cbuffer, blocks[b].cbuffer, blocks[b].compressed_size);
+		if (rc != blocks[b].compressed_size) {
+			fprintf(stderr, "buffer add failed\n");
+			goto bail;
+		}
 		max_block_offset += rc;
+	}
+	for (b = 0; b < super.blocks; b++) {
+		if (blocks[b].status != 2) {
+			fprintf(stderr, "logic error\n");
+			goto bail;
+		}
 	}
 
 	fprintf(stdout, "  calculating super max/min bits (3/3)\n");
@@ -742,6 +817,10 @@ static int output_write (void)
 
 	close(fd);
 	free(bc);
+	for (b = 0; blocks != NULL && b < super.blocks; b++) {
+		free(blocks[b].cbuffer);
+		blocks[b].cbuffer = NULL;
+	}
 	free(blocks);
 	buffer_uninit(&entry_cbuffer);
 	buffer_uninit(&inode_cbuffer);
@@ -754,6 +833,10 @@ static int output_write (void)
 bail:
 	close(fd);
 	free(bc);
+	for (b = 0; blocks != NULL && b < super.blocks; b++) {
+		free(blocks[b].cbuffer);
+		blocks[b].cbuffer = NULL;
+	}
 	free(blocks);
 	bitbuffer_uninit(&bitbuffer);
 	buffer_uninit(&entry_cbuffer);
@@ -1103,6 +1186,7 @@ static void help_print (const char *pname)
 	fprintf(stdout, "  -o, --output     : output file\n");
 	fprintf(stdout, "  -b, --block_size : block size (default: %d)\n", block_size);
 	fprintf(stdout, "  -d, --debug      : enable debug output (default: %d)\n", debug);
+	fprintf(stdout, "  -j, --jobs       : enable compressing with jobs (default: %d)\n", njobs);
 	fprintf(stdout, "  --no_group_mode  : disable group mode\n");
 	fprintf(stdout, "  --no_other_mode  : disable other mode\n");
 	fprintf(stdout, "  --no_uid         : disable uid\n");
@@ -1128,6 +1212,7 @@ int main (int argc, char *argv[])
 		{"block_size"   , required_argument, 0, 'b' },
 		{"compressor"   , required_argument, 0, 'c' },
 		{"debug"        , no_argument      , 0, 'd' },
+		{"jobs"         , no_argument      , 0, 'j' },
 		{"no_group_mode", no_argument      , 0, 0x100 },
 		{"no_other_mode", no_argument      , 0, 0x101 },
 		{"no_uid"       , no_argument      , 0, 0x102 },
@@ -1142,7 +1227,7 @@ int main (int argc, char *argv[])
 	rc = 0;
 	option_index = 0;
 	compressor = compressor_create_name("none");
-	while ((c = getopt_long(argc, argv, "hds:o:b:c:", long_options, &option_index)) != -1) {
+	while ((c = getopt_long(argc, argv, "hdj:s:o:b:c:", long_options, &option_index)) != -1) {
 		switch (c) {
 			case 's':
 				source = malloc(sizeof(struct source));
@@ -1181,6 +1266,9 @@ int main (int argc, char *argv[])
 				break;
 			case 'd':
 				debug += 1;
+				break;
+			case 'j':
+				njobs = MIN(MAX_JOBS, atoi(optarg));
 				break;
 			case 0x100:
 				no_group_mode = 1;

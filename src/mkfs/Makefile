@@ -42,10 +42,14 @@ mkfs.smashfs_cflags-${SMASHFS_ENABLE_XZ} += \
 mkfs.smashfs_files-${SMASHFS_ENABLE_XZ} += \
 	compressor-xz.c
 
+mkfs.smashfs_includes-y = \
+	../include
+
 mkfs.smashfs_libraries-y = \
 	/opt/local/lib
 
 mkfs.smashfs_ldflags-y = \
+	-lpthread \
 	-lz \
 	-llzma \
 	-llzo2
@@ -83,6 +87,9 @@ unfs.smashfs_cflags-${SMASHFS_ENABLE_XZ} += \
 
 unfs.smashfs_files-${SMASHFS_ENABLE_XZ} += \
 	compressor-xz.c
+
+unfs.smashfs_includes-y = \
+	../include
 
 unfs.smashfs_libraries-y = \
 	/opt/local/lib
