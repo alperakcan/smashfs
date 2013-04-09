@@ -27,38 +27,35 @@
  * either expressed or implied, of the FreeBSD Project.
  */
 
-#include <string.h>
-#include <lzma.h>
-
-#define MEMLIMIT		(256 * 1024 * 1024)
+#include <linux/module.h>
+#include <linux/xz.h>
 
 int xz_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
-	size_t lzma_len;
-	size_t lzma_pos;
-	lzma_ret lzma_err;
-	lzma_check lzma_ck;
-	unsigned char *lzma;
-	lzma_len = dsize;
-	lzma = dst;
-	lzma_pos = 0;
-	lzma_ck = LZMA_CHECK_CRC64;
-	if (!lzma_check_is_supported(lzma_ck)) {
-		lzma_ck = LZMA_CHECK_CRC32;
-	}
-	lzma_err = lzma_easy_buffer_encode(9 | LZMA_PRESET_EXTREME, /* lzma_ck */ 0, NULL, src, ssize, lzma, &lzma_pos, lzma_len);
-	if (lzma_err == LZMA_OK) {
-		return lzma_pos;
-	} else {
-		return -1;
-	}
+	(void) src;
+	(void) ssize;
+	(void) dst;
+	(void) dsize;
+	return -1;
 }
 
 int xz_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
-	size_t src_pos = 0;
-	size_t dest_pos = 0;
-	uint64_t memlimit = MEMLIMIT;
-	lzma_ret res = lzma_stream_buffer_decode(&memlimit, 0, NULL, src, &src_pos, ssize, dst, &dest_pos, dsize);
-	return res == LZMA_OK && (ssize == src_pos) ? (int) dest_pos : -1;
+	enum xz_ret ret;
+	struct xz_buf b;
+	struct xz_dec *s;
+	//xz_crc32_init();
+	s = xz_dec_init(XZ_SINGLE, 0);
+	if (s == NULL) {
+		return -1;
+	}
+	b.in = src;
+	b.in_pos = 0;
+	b.in_size = ssize;
+	b.out = dst;
+	b.out_pos = 0;
+	b.out_size = dsize;
+	ret = xz_dec_run(s, &b);
+	xz_dec_end(s);
+	return (ret == XZ_STREAM_END) ? b.out_pos : -1;
 }
