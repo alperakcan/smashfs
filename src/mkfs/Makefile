@@ -1,5 +1,8 @@
 
-SMASHFS_ENABLE_XZ ?= y
+SMASHFS_ENABLE_GZIP ?= y
+SMASHFS_ENABLE_LZMA ?= y
+SMASHFS_ENABLE_LZO  ?= y
+SMASHFS_ENABLE_XZ   ?= y
 
 target.host-y = \
 	mkfs.smashfs \
@@ -10,13 +13,28 @@ mkfs.smashfs_files-y = \
 	buffer.c \
 	bitbuffer.c \
 	compressor.c \
-	compressor-none.c \
-	compressor-gzip.c \
-	compressor-lzma.c \
-	compressor-lzo.c
+	compressor-none.c
 
 mkfs.smashfs_cflags-y += \
 	-U_FILE_OFFSET_BITS
+
+mkfs.smashfs_cflags-${SMASHFS_ENABLE_GZIP} += \
+	-DSMASHFS_ENABLE_GZIP=1
+
+mkfs.smashfs_files-${SMASHFS_ENABLE_GZIP} += \
+	compressor-gzip.c
+
+mkfs.smashfs_cflags-${SMASHFS_ENABLE_LZMA} += \
+	-DSMASHFS_ENABLE_LZMA=1
+
+mkfs.smashfs_files-${SMASHFS_ENABLE_LZMA} += \
+	compressor-lzma.c
+
+mkfs.smashfs_cflags-${SMASHFS_ENABLE_LZO} += \
+	-DSMASHFS_ENABLE_LZO=1
+
+mkfs.smashfs_files-${SMASHFS_ENABLE_LZO} += \
+	compressor-lzo.c
 
 mkfs.smashfs_cflags-${SMASHFS_ENABLE_XZ} += \
 	-DSMASHFS_ENABLE_XZ=1
@@ -37,13 +55,28 @@ unfs.smashfs_files-y = \
 	buffer.c \
 	bitbuffer.c \
 	compressor.c \
-	compressor-none.c \
-	compressor-gzip.c \
-	compressor-lzma.c \
-	compressor-lzo.c
+	compressor-none.c
 
 unfs.smashfs_cflags-y += \
 	-U_FILE_OFFSET_BITS
+
+unfs.smashfs_cflags-${SMASHFS_ENABLE_GZIP} += \
+	-DSMASHFS_ENABLE_GZIP=1
+
+unfs.smashfs_files-${SMASHFS_ENABLE_GZIP} += \
+	compressor-gzip.c
+
+unfs.smashfs_cflags-${SMASHFS_ENABLE_LZMA} += \
+	-DSMASHFS_ENABLE_LZMA=1
+
+unfs.smashfs_files-${SMASHFS_ENABLE_LZMA} += \
+	compressor-lzma.c
+
+unfs.smashfs_cflags-${SMASHFS_ENABLE_LZO} += \
+	-DSMASHFS_ENABLE_LZO=1
+
+unfs.smashfs_files-${SMASHFS_ENABLE_LZO} += \
+	compressor-lzo.c
 
 unfs.smashfs_cflags-${SMASHFS_ENABLE_XZ} += \
 	-DSMASHFS_ENABLE_XZ=1

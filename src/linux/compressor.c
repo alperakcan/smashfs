@@ -23,9 +23,15 @@
 
 #include "compressor.h"
 #include "compressor-none.h"
+#if defined(SMASHFS_ENABLE_GZIP) && (SMASHFS_ENABLE_GZIP == 1)
 #include "compressor-gzip.h"
+#endif
+#if defined(SMASHFS_ENABLE_LZMA) && (SMASHFS_ENABLE_LZMA == 1)
+#endif
 #include "compressor-lzma.h"
+#if defined(SMASHFS_ENABLE_LZO) && (SMASHFS_ENABLE_LZO == 1)
 #include "compressor-lzo.h"
+#endif
 #if defined(SMASHFS_ENABLE_XZ) && (SMASHFS_ENABLE_XZ == 1)
 #include "compressor-xz.h"
 #endif
@@ -39,9 +45,15 @@ struct compressor {
 
 struct compressor *compressors[] = {
 	& (struct compressor) { "none", smashfs_compression_type_none, none_compress, none_uncompress },
+#if defined(SMASHFS_ENABLE_GZIP) && (SMASHFS_ENABLE_GZIP == 1)
 	& (struct compressor) { "gzip", smashfs_compression_type_gzip, gzip_compress, gzip_uncompress },
+#endif
+#if defined(SMASHFS_ENABLE_LZMA) && (SMASHFS_ENABLE_LZMA == 1)
 	& (struct compressor) { "lzma", smashfs_compression_type_lzma, lzma_compress, lzma_uncompress },
+#endif
+#if defined(SMASHFS_ENABLE_LZO) && (SMASHFS_ENABLE_LZO == 1)
 	& (struct compressor) { "lzo" , smashfs_compression_type_lzo , lzo_compress , lzo_uncompress  },
+#endif
 #if defined(SMASHFS_ENABLE_XZ) && (SMASHFS_ENABLE_XZ == 1)
 	& (struct compressor) { "xz"  , smashfs_compression_type_xz  , xz_compress  , xz_uncompress   },
 #endif
