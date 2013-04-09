@@ -393,6 +393,8 @@ static int node_read (struct super_block *sb, struct node *node, int (*function)
 	long long s;
 	long long i;
 	long long b;
+	long long n;
+	long long o;
 	void *ubuffer;
 	void *cbuffer;
 	struct block block;
@@ -417,10 +419,14 @@ static int node_read (struct super_block *sb, struct node *node, int (*function)
 		return -1;
 	}
 
+	o = offset + node->index + (node->block * sbi->super->block_size);
+	i = o & ((1 << sbi->super->block_log2) - 1);
+	b = o >> sbi->super->block_log2;
+	n = ((size + sbi->super->block_size - 1) >> sbi->super->block_log2) + 1;
+	debugf("offset: %lld, index: %lld, block: %lld, blocks: %lld\n", offset, i, b, n);
+
 	s = 0;
-	i = node->index;
-	b = node->block;
-	while (s < node->size) {
+	while (s < size) {
 		rc = block_fill(sb, b, &block);
 		if (rc != 0) {
 			errorf("block fill failed\n");
@@ -440,12 +446,12 @@ static int node_read (struct super_block *sb, struct node *node, int (*function)
 			errorf("uncompress failed");
 			goto bail;
 		}
-		rc = function(context, ubuffer + i, min_t(long long, node->size - s, block.size - i));
-		if (rc != min_t(long long, node->size - s, block.size - i)) {
+		rc = function(context, ubuffer + i, min_t(long long, size - s, block.size - i));
+		if (rc != min_t(long long, size - s, block.size - i)) {
 			errorf("function failed\n");
 			goto bail;
 		}
-		s += min_t(long long, node->size - s, block.size - i);
+		s += min_t(long long, size - s, block.size - i);
 		b += 1;
 		i = 0;
 	}
@@ -805,23 +811,14 @@ static int smashfs_readpage (struct file *file, struct page *page)
 			bytes_filled = min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
 			kfree(nbuffer);
 		} else if (node.type == smashfs_inode_type_regular_file) {
-			nbuffer = kmalloc(node.size, GFP_KERNEL);
-			if (nbuffer == NULL) {
-				errorf("kmalloc failed\n");
-				goto bail;
-			}
-			buffer = nbuffer;
-			rc = node_read(sb, &node, node_read_regular_file, &buffer, 0, node.size);
+			buffer = pgdata;
+			rc = node_read(sb, &node, node_read_regular_file, &buffer, page->index * PAGE_CACHE_SIZE, min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE));
 			if (rc != 0) {
 				errorf("node read failed\n");
-				kfree(nbuffer);
 				leavef();
 				goto bail;
 			}
-			buffer = nbuffer;
-			memcpy(pgdata, buffer + (page->index * PAGE_CACHE_SIZE), min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE));
 			bytes_filled = min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
-			kfree(nbuffer);
 		} else {
 			errorf("unknown node type: %lld\n", node.type);
 			goto bail;
