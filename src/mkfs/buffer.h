@@ -41,6 +41,7 @@ struct buffer {
 
 int buffer_init (struct buffer *buffer);
 int buffer_uninit (struct buffer *buffer);
+int buffer_reset (struct buffer *buffer);
 long long buffer_length (struct buffer *buffer);
 void * buffer_buffer (struct buffer *buffer);
 int buffer_add (struct buffer *buffer, const void *data, unsigned int size);

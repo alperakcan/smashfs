@@ -47,6 +47,12 @@ int buffer_uninit (struct buffer *buffer)
 	return 0;
 }
 
+int buffer_reset (struct buffer *buffer)
+{
+	buffer->length = 0;
+	return 0;
+}
+
 long long buffer_length (struct buffer *buffer)
 {
 	return buffer->length;

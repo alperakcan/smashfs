@@ -600,7 +600,6 @@ static int output_write (void)
 	}
 	bitbuffer_uninit(&bitbuffer);
 
-#if 0
 	free(bc);
 	bc = malloc(size * 2);
 	if (bc == NULL) {
@@ -617,19 +616,13 @@ static int output_write (void)
 		fprintf(stdout, "buffer add failed\n");
 		goto bail;
 	}
-#else
-	rc = buffer_add(&inode_cbuffer, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer));
-	if (rc < 0) {
-		fprintf(stdout, "buffer add failed\n");
-		goto bail;
-	}
-#endif
 
 	fprintf(stdout, "  setting super block (4/4)\n");
 
 	super.inodes_offset  = sizeof(struct smashfs_super_block);
-	super.inodes_size    = buffer_length(&inode_cbuffer);
-	super.blocks_offset  = super.inodes_offset + super.inodes_size;
+	super.inodes_size    = buffer_length(&inode_buffer);
+	super.inodes_csize   = buffer_length(&inode_cbuffer);
+	super.blocks_offset  = super.inodes_offset + super.inodes_csize;
 	super.blocks_size    = buffer_length(&block_buffer);
 	super.entries_offset = super.blocks_offset + super.blocks_size;
 	super.entries_size   = buffer_length(&entry_cbuffer);
@@ -648,6 +641,7 @@ static int output_write (void)
 		fprintf(stdout, "    root          : 0x%08x, %u\n", super.root, super.root);
 		fprintf(stdout, "    inodes_offset : 0x%08x, %u\n", super.inodes_offset, super.inodes_offset);
 		fprintf(stdout, "    inodes_size   : 0x%08x, %u\n", super.inodes_size, super.inodes_size);
+		fprintf(stdout, "    inodes_csize  : 0x%08x, %u\n", super.inodes_size, super.inodes_csize);
 		fprintf(stdout, "    blocks_offset : 0x%08x, %u\n", super.blocks_offset, super.blocks_offset);
 		fprintf(stdout, "    blocks_size   : 0x%08x, %u\n", super.blocks_size, super.blocks_size);
 		fprintf(stdout, "    entries_offset: 0x%08x, %u\n", super.entries_offset, super.entries_offset);

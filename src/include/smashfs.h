@@ -68,6 +68,7 @@ struct smashfs_super_block {
 	uint32_t root;
 	uint32_t inodes_offset;
 	uint32_t inodes_size;
+	uint32_t inodes_csize;
 	uint32_t blocks_offset;
 	uint32_t blocks_size;
 	uint32_t entries_offset;

@@ -901,6 +901,7 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 {
 	int rc;
 	char b[BDEVNAME_SIZE];
+	void *cbuffer;
 	struct inode *root;
 	struct smashfs_super_info *sbi;
 	struct smashfs_super_block *sbl;
@@ -909,6 +910,7 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 
 	sbi = NULL;
 	sbl = NULL;
+	cbuffer = NULL;
 	sbi = kmalloc(sizeof(struct smashfs_super_info), GFP_KERNEL);
 	if (sbi == NULL) {
 		errorf("kalloc failed for super info\n");
@@ -956,6 +958,7 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	debugf("  root          : 0x%08x, %u\n", sbl->root, sbl->root);
 	debugf("  inodes_offset : 0x%08x, %u\n", sbl->inodes_offset, sbl->inodes_offset);
 	debugf("  inodes_size   : 0x%08x, %u\n", sbl->inodes_size, sbl->inodes_size);
+	debugf("  inodes_csize  : 0x%08x, %u\n", sbl->inodes_csize, sbl->inodes_csize);
 	debugf("  blocks_offset : 0x%08x, %u\n", sbl->blocks_offset, sbl->blocks_offset);
 	debugf("  blocks_size   : 0x%08x, %u\n", sbl->blocks_size, sbl->blocks_size);
 	debugf("  entries_offset: 0x%08x, %u\n", sbl->entries_offset, sbl->entries_offset);
@@ -991,6 +994,12 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	debugf("      compressed_size: %u\n", sbl->bits.block.compressed_size);
 	debugf("      size           : %u\n", sbl->bits.block.size);
 
+	sbi->compressor = compressor_create_type(sbl->compression_type);
+	if (sbi->compressor == NULL) {
+		errorf("compressor create failed\n");
+		goto bail;
+	}
+
 	sbi->max_inode_size  = 0;
 	sbi->max_inode_size += sbl->bits.inode.type;
 	sbi->max_inode_size += sbl->bits.inode.owner_mode;
@@ -1014,6 +1023,7 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	sbi->max_block_size  = 0;
 	sbi->max_block_size += sbl->bits.block.offset;
 	sbi->max_block_size += sbl->bits.block.compressed_size;
+
 	sbi->blocks_table = kmalloc(sbl->blocks_size, GFP_KERNEL);
 
 	if (sbi->blocks_table == NULL) {
@@ -1021,21 +1031,27 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		goto bail;
 	}
 
-	rc = smashfs_read(sb, sbi->inodes_table, sbl->inodes_offset, sbl->inodes_size);
-	if (rc != sbl->inodes_size) {
+	cbuffer = kmalloc(sbl->inodes_csize, GFP_KERNEL);
+	if (cbuffer == NULL) {
+		errorf("kmalloc failed\n");
+		goto bail;
+	}
+	rc = smashfs_read(sb, cbuffer, sbl->inodes_offset, sbl->inodes_csize);
+	if (rc != sbl->inodes_csize) {
 		errorf("read failed for inodes table\n");
 		goto bail;
 	}
+	rc = compressor_uncompress(sbi->compressor, cbuffer, sbl->inodes_csize, sbi->inodes_table, sbl->inodes_size);
+	if (rc != sbl->inodes_size) {
+		errorf("uncompress failed\n");
+		goto bail;
+	}
+	kfree(cbuffer);
+	cbuffer = NULL;
 
 	rc = smashfs_read(sb, sbi->blocks_table, sbl->blocks_offset, sbl->blocks_size);
 	if (rc != sbl->blocks_size) {
 		errorf("read failed for blocks table\n");
-		goto bail;
-	}
-
-	sbi->compressor = compressor_create_type(sbl->compression_type);
-	if (sbi->compressor == NULL) {
-		errorf("compressor create failed\n");
 		goto bail;
 	}
 
@@ -1061,6 +1077,9 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		goto bail;
 	}
 
+	if (cbuffer != NULL) {
+		kfree(cbuffer);
+	}
 	leavef();
 	return 0;
 bail:
@@ -1076,7 +1095,12 @@ bail:
 		}
 		kfree(sbi);
 	}
-	kfree(sbl);
+	if (cbuffer != NULL) {
+		kfree(cbuffer);
+	}
+	if (sbl != NULL) {
+		kfree(sbl);
+	}
 	sb->s_fs_info = NULL;
 	leavef();
 	return -EINVAL;

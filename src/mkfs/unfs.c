@@ -359,7 +359,7 @@ static void traverse (long long inode, const char *name, long long level)
 		unlink(name);
 		fd = open(name, O_CREAT | O_TRUNC | O_WRONLY, mode);
 		if (fd < 0) {
-			fprintf(stderr, "open failed\n");
+			fprintf(stderr, "open failed for: %s\n", name);
 			return;
 		}
 		rc = node_read(&node, node_read_regular_file, &fd);
@@ -434,7 +434,9 @@ int main (int argc, char *argv[])
 	unsigned int r;
 	int option_index;
 	unsigned int bsize;
+	unsigned int cbsize;
 	unsigned char *buffer;
+	unsigned char *cbuffer;
 	char *cwd;
 	static struct option long_options[] = {
 		{"source"    , required_argument, 0, 's' },
@@ -446,7 +448,9 @@ int main (int argc, char *argv[])
 	fd = -1;
 	cwd = NULL;
 	bsize = 0;
+	cbsize = 0;
 	buffer = NULL;
+	cbuffer = NULL;
 	rc = 0;
 	option_index = 0;
 	buffer_init(&inode_buffer);
@@ -516,6 +520,7 @@ int main (int argc, char *argv[])
 		fprintf(stdout, "    root          : 0x%08x, %u\n", super.root, super.root);
 		fprintf(stdout, "    inodes_offset : 0x%08x, %u\n", super.inodes_offset, super.inodes_offset);
 		fprintf(stdout, "    inodes_size   : 0x%08x, %u\n", super.inodes_size, super.inodes_size);
+		fprintf(stdout, "    inodes_csize  : 0x%08x, %u\n", super.inodes_size, super.inodes_csize);
 		fprintf(stdout, "    blocks_offset : 0x%08x, %u\n", super.blocks_offset, super.blocks_offset);
 		fprintf(stdout, "    blocks_size   : 0x%08x, %u\n", super.blocks_size, super.blocks_size);
 		fprintf(stdout, "    entries_offset: 0x%08x, %u\n", super.entries_offset, super.entries_offset);
@@ -574,8 +579,8 @@ int main (int argc, char *argv[])
 		goto bail;
 	}
 	r = 0;
-	while (r < super.inodes_size) {
-		rc = read(fd, buffer, MIN(bsize, super.inodes_size - r));
+	while (r < super.inodes_csize) {
+		rc = read(fd, buffer, MIN(bsize, super.inodes_csize - r));
 		if (rc <= 0) {
 			fprintf(stderr, "read failed\n");
 			rc = -1;
@@ -588,6 +593,26 @@ int main (int argc, char *argv[])
 			goto bail;
 		}
 		r += rc;
+	}
+	cbsize = super.inodes_size;
+	cbuffer = malloc(cbsize);
+	if (cbuffer == NULL) {
+		fprintf(stderr, "malloc failed\n");
+		rc = -1;
+		goto bail;
+	}
+	rc = compressor_uncompress(compressor, buffer_buffer(&inode_buffer), buffer_length(&inode_buffer), cbuffer, cbsize);
+	if (rc != (int) cbsize) {
+		fprintf(stderr, "uncompress failed\n");
+		rc = -1;
+		goto bail;
+	}
+	buffer_reset(&inode_buffer);
+	rc = buffer_add(&inode_buffer, cbuffer, cbsize);
+	if (rc != (int) cbsize) {
+		fprintf(stderr, "buffer add failed\n");
+		rc = -1;
+		goto bail;
 	}
 	fprintf(stdout, "reading block table\n");
 	rc = lseek(fd, super.blocks_offset, SEEK_SET);
@@ -717,6 +742,7 @@ bail:
 	close(fd);
 	free(cwd);
 	free(buffer);
+	free(cbuffer);
 	free(source);
 	free(output);
 	buffer_uninit(&entry_buffer);
