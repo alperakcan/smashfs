@@ -37,6 +37,7 @@ int lzo_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 	int rc;
 	lzo_uint outlen;
 	lzo_voidp workmem;
+	(void) dsize;
 	workmem = malloc(LZO1X_999_MEM_COMPRESS);
 	if (workmem == NULL) {
 		return -1;
@@ -58,5 +59,5 @@ int lzo_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize
 	int res;
 	lzo_uint bytes = dsize;
 	res = lzo1x_decompress_safe((lzo_bytep) src, ssize, (lzo_bytep) dst, &bytes, NULL);
-	return res == LZO_E_OK ? bytes : -1;
+	return res == LZO_E_OK ? (int) bytes : -1;
 }

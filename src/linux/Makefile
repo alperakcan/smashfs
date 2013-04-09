@@ -13,6 +13,7 @@ ${MOD_NAME}-objs += compressor.o
 ${MOD_NAME}-objs += compressor-none.o
 ${MOD_NAME}-objs += compressor-gzip.o
 ${MOD_NAME}-objs += compressor-lzma.o
+${MOD_NAME}-objs += compressor-lzo.o
 ${MOD_NAME}-objs += compressor-xz.o
 
 cflags-y  = -I${SUBDIRS}/../include
