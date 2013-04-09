@@ -559,7 +559,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		}
 		debugf("calling filldir(%p, %s, %lld, %lld, %d, %d)\n", dirent, name, s, filp->f_pos, i_ino, DT_DIR);
 		if (filldir(dirent, name, s, filp->f_pos, i_ino, DT_DIR) < 0) {
-			errorf("filldir failed\n");
+			debugf("filldir failed\n");
 			leavef();
 			return 0;
 		}

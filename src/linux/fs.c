@@ -39,6 +39,7 @@ static int __init init_smashfs_fs (void)
 {
 	int rc;
 	rc = register_filesystem(&smashfs_fs_type);
+	printk(KERN_INFO "smashfs: (c) 2013 Alper Akcan\n");
 	return rc;
 }
 
