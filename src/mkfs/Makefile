@@ -10,7 +10,8 @@ mkfs.smashfs_files-y = \
 	compressor.c \
 	compressor-none.c \
 	compressor-gzip.c \
-	compressor-lzma.c
+	compressor-lzma.c \
+	compressor-xz.c
 
 mkfs.smashfs_libraries-y = \
 	/opt/local/lib
@@ -29,7 +30,8 @@ unfs.smashfs_files-y = \
 	compressor.c \
 	compressor-none.c \
 	compressor-gzip.c \
-	compressor-lzma.c
+	compressor-lzma.c \
+	compressor-xz.c
 
 unfs.smashfs_cflags-y = \
 	-U_FILE_OFFSET_BITS

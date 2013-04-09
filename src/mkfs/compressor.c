@@ -37,6 +37,7 @@
 #include "compressor-none.h"
 #include "compressor-gzip.h"
 #include "compressor-lzma.h"
+#include "compressor-xz.h"
 
 struct compressor {
 	char *name;
@@ -49,6 +50,7 @@ struct compressor *compressors[] = {
 	& (struct compressor) { "none", smashfs_compression_type_none, none_compress, none_uncompress },
 	& (struct compressor) { "gzip", smashfs_compression_type_gzip, gzip_compress, gzip_uncompress },
 	& (struct compressor) { "lzma", smashfs_compression_type_lzma, lzma_compress, lzma_uncompress },
+	& (struct compressor) { "xz"  , smashfs_compression_type_xz  , xz_compress  , xz_uncompress   },
 	NULL
 };
 

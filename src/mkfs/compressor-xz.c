@@ -27,68 +27,38 @@
  * either expressed or implied, of the FreeBSD Project.
  */
 
-#include <stdio.h>
 #include <string.h>
 #include <lzma.h>
 
-#define LZMA_PROPS_SIZE		5
-#define LZMA_UNCOMP_SIZE	8
-#define LZMA_HEADER_SIZE	(LZMA_PROPS_SIZE + LZMA_UNCOMP_SIZE)
-
-#define LZMA_OPTIONS		9
 #define MEMLIMIT		(256 * 1024 * 1024)
 
-#define MAX(a, b)		(((a) > (b)) ? (a) : (b))
-
-int lzma_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+int xz_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
-	lzma_options_lzma opt;
-	lzma_stream strm = LZMA_STREAM_INIT;
-	int res;
-	if (ssize + LZMA_HEADER_SIZE > dsize) {
-		fprintf(stderr, "not enough space\n");
-		goto bail;
+	size_t lzma_len;
+	size_t lzma_pos;
+	lzma_ret lzma_err;
+	lzma_check lzma_ck;
+	unsigned char *lzma;
+	lzma_len = dsize;
+	lzma = dst;
+	lzma_pos = 0;
+	lzma_ck = LZMA_CHECK_CRC64;
+	if (!lzma_check_is_supported(lzma_ck)) {
+		lzma_ck = LZMA_CHECK_CRC32;
 	}
-	lzma_lzma_preset(&opt, LZMA_OPTIONS);
-	opt.dict_size = MAX(4096, ssize);
-	res = lzma_alone_encoder(&strm, &opt);
-	if(res != LZMA_OK) {
-		fprintf(stderr, "lzma_alone_encoder failed\n");
-		lzma_end(&strm);
-		goto bail;
+	lzma_err = lzma_easy_buffer_encode(9 | LZMA_PRESET_EXTREME, lzma_ck, NULL, src, ssize, lzma, &lzma_pos, lzma_len);
+	if (lzma_err == LZMA_OK) {
+		return lzma_pos;
+	} else {
+		return -1;
 	}
-	strm.next_out = dst;
-	strm.avail_out = dsize;
-	strm.next_in = src;
-	strm.avail_in = ssize;
-	res = lzma_code(&strm, LZMA_FINISH);
-	lzma_end(&strm);
-	if(res != LZMA_STREAM_END) {
-		fprintf(stderr, "lzma_code failed\n");
-		goto bail;
-	}
-	return (int) strm.total_out;
-bail:	return -1;
 }
 
-int lzma_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+int xz_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
-	int rc;
-	lzma_stream strm = LZMA_STREAM_INIT;
-	rc = lzma_alone_decoder(&strm, MEMLIMIT);
-	if(rc != LZMA_OK) {
-		fprintf(stderr, "lzma_alone_encoder failed\n");
-		lzma_end(&strm);
-		goto bail;
-	}
-	strm.next_out = dst;
-	strm.avail_out = dsize;
-	strm.next_in = src;
-	strm.avail_in = ssize;
-	rc = lzma_code(&strm, LZMA_FINISH);
-	lzma_end(&strm);
-	if (rc == LZMA_STREAM_END) {
-		return dsize;
-	}
-bail:	return -1;
+	size_t src_pos = 0;
+	size_t dest_pos = 0;
+	uint64_t memlimit = MEMLIMIT;
+	lzma_ret res = lzma_stream_buffer_decode(&memlimit, 0, NULL, src, &src_pos, ssize, dst, &dest_pos, dsize);
+	return res == LZMA_OK && (ssize == src_pos) ? (int) dest_pos : -1;
 }
