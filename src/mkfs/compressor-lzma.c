@@ -31,7 +31,7 @@
 #include <string.h>
 #include <lzma.h>
 
-#define LZMA_OPTIONS		9
+#define LZMA_OPTIONS		6
 #define MEMLIMIT		(256 * 1024 * 1024)
 
 #define MAX(a, b)		(((a) > (b)) ? (a) : (b))

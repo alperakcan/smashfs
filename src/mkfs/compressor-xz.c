@@ -47,7 +47,7 @@ int xz_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 		lzma_ck = LZMA_CHECK_CRC32;
 	}
 	lzma_ck = LZMA_CHECK_NONE;
-	lzma_err = lzma_easy_buffer_encode(9 | LZMA_PRESET_EXTREME, lzma_ck, NULL, src, ssize, lzma, &lzma_pos, lzma_len);
+	lzma_err = lzma_easy_buffer_encode(6, lzma_ck, NULL, src, ssize, lzma, &lzma_pos, lzma_len);
 	if (lzma_err == LZMA_OK) {
 		return lzma_pos;
 	} else {
