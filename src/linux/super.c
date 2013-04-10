@@ -82,9 +82,21 @@ static const struct file_operations smashfs_directory_operations;
 static const struct inode_operations smashfs_dir_inode_operations;
 static const struct address_space_operations smashfs_aops;
 
-static struct kmem_cache *smashfs_inode_cachep = NULL;
+static struct kmem_cache *smashfs_inode_cachep			= NULL;
 
 static DEFINE_MUTEX(read_mutex);
+
+#define BLOCK_CACHE_MAX						1
+
+struct block_cache {
+	struct block block;
+	void *buffer;
+};
+
+static DEFINE_MUTEX(block_cache_mutex);
+
+static long long nblock_caches				= 0;
+static struct block_cache block_caches[BLOCK_CACHE_MAX];
 
 static inline struct node_info * smashfs_i (struct inode *inode)
 {
@@ -411,6 +423,7 @@ static inline int smashfs_read (struct super_block *sb, void *buffer, int offset
 static inline int node_read (struct super_block *sb, struct node *node, int (*function) (void *context, void *buffer, long long size), void *context, long long offset, long long size)
 {
 	int rc;
+	long long c;
 	long long s;
 	long long i;
 	long long b;
@@ -420,6 +433,7 @@ static inline int node_read (struct super_block *sb, struct node *node, int (*fu
 	void *ubuffer;
 	void *cbuffer;
 	struct block block;
+	struct block_cache *blockc;
 	struct smashfs_super_info *sbi;
 
 	enterf();
@@ -458,25 +472,68 @@ static inline int node_read (struct super_block *sb, struct node *node, int (*fu
 			errorf("logic error\n");
 			goto bail;
 		}
-		rc = smashfs_read(sb, cbuffer, sbi->super->entries_offset + block.offset, block.compressed_size);
-		if (rc != block.compressed_size) {
-			errorf("read block failed");
-			goto bail;
+
+		mutex_lock(&block_cache_mutex);
+		for (c = 0; c < nblock_caches; c++) {
+			blockc = &block_caches[c];
+			if (memcmp(&blockc->block, &block, sizeof(struct block)) == 0) {
+				break;
+			}
 		}
-		rc = compressor_uncompress(sbi->compressor, cbuffer, block.compressed_size, ubuffer, block.size);
-		if (rc != block.size) {
-			errorf("uncompress failed");
-			goto bail;
+		if (c < nblock_caches) {
+			memcpy(ubuffer, blockc->buffer, block.size);
+			mutex_unlock(&block_cache_mutex);
+
+			l = min_t(long long, size - s, block.size - i);
+			rc = function(context, ubuffer + i, l);
+			if (rc != l) {
+				errorf("function failed\n");
+				goto bail;
+			}
+			s += l;
+			b += 1;
+			i = 0;
+		} else {
+			mutex_unlock(&block_cache_mutex);
+			rc = smashfs_read(sb, cbuffer, sbi->super->entries_offset + block.offset, block.compressed_size);
+			if (rc != block.compressed_size) {
+				errorf("read block failed");
+				goto bail;
+			}
+			rc = compressor_uncompress(sbi->compressor, cbuffer, block.compressed_size, ubuffer, block.size);
+			if (rc != block.size) {
+				errorf("uncompress failed");
+				goto bail;
+			}
+
+			l = min_t(long long, size - s, block.size - i);
+			rc = function(context, ubuffer + i, l);
+			if (rc != l) {
+				errorf("function failed\n");
+				goto bail;
+			}
+			s += l;
+			b += 1;
+			i = 0;
+
+			mutex_lock(&block_cache_mutex);
+			if (nblock_caches == BLOCK_CACHE_MAX) {
+				kfree(block_caches[BLOCK_CACHE_MAX - 1].buffer);
+			}
+			memmove(&block_caches[1], &block_caches[0], sizeof(struct block_cache) * (BLOCK_CACHE_MAX - 1));
+			memcpy(&block_caches[0].block, &block, sizeof(struct block));
+			block_caches[0].buffer = ubuffer;
+			nblock_caches = min_t(long long, nblock_caches + 1, BLOCK_CACHE_MAX);
+			mutex_unlock(&block_cache_mutex);
+
+			ubuffer = kmalloc(sbi->super->block_size, GFP_KERNEL);
+			if (ubuffer == NULL) {
+				errorf("malloc failed\n");
+				kfree(cbuffer);
+				leavef();
+				return -1;
+			}
 		}
-		l = min_t(long long, size - s, block.size - i);
-		rc = function(context, ubuffer + i, l);
-		if (rc != l) {
-			errorf("function failed\n");
-			goto bail;
-		}
-		s += l;
-		b += 1;
-		i = 0;
 	}
 
 	kfree(cbuffer);
