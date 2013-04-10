@@ -227,7 +227,7 @@ static struct inode * smashfs_get_inode (struct super_block *sb, long long numbe
 		inode->i_data.a_ops = &smashfs_aops;
 	} else {
 		errorf("unknown node type: %lld\n", node.type);
-		unlock_new_inode(inode);
+		iget_failed(inode);
 		leavef();
 		return ERR_PTR(-EINVAL);
 	}
@@ -636,7 +636,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 
 		debugf("    filp->f_pos: %lld, %zd\n", filp->f_pos, ((buffer - s) - nbuffer) + 3);
 		if (filp->f_pos == ((buffer - s) - nbuffer) + 3) {
-			debugf("    calling filldir(%p, %s, %zd, %lld, %lld, %s)\n",
+			debugf("    calling filldir(%p, %s, %lld, %lld, %lld, %s)\n",
 				dirent,
 				buffer,
 				directory_entry_length,
@@ -778,7 +778,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 
 	kfree(nbuffer);
 	leavef();
-	return ERR_PTR(-EINVAL);
+	return ERR_PTR(-ENOENT);
 }
 
 static int smashfs_readpage (struct file *file, struct page *page)
