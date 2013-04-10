@@ -26,7 +26,7 @@
 #include <linux/namei.h>
 #include <linux/version.h>
 
-#include "../include/smashfs.h"
+#include "smashfs.h"
 #include "bitbuffer.h"
 #include "compressor.h"
 #include "super.h"
@@ -640,12 +640,10 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 
 		buffer += s;
 
-		debugf("  - %lld\n", directory_entry_number);
-		debugf("    filp->f_pos: %lld, %zd\n", filp->f_pos, ((buffer - s) - nbuffer) + 3);
+		debugf("  - %lld, f_pos: %lld, %zd\n", directory_entry_number, filp->f_pos, ((buffer - s) - nbuffer) + 3);
 		if (filp->f_pos == ((buffer - s) - nbuffer) + 3) {
-			debugf("    calling filldir(%p, %s, %lld, %lld, %lld, %s)\n",
+			debugf("    calling filldir(%p, %lld, %lld, %lld, %s)\n",
 				dirent,
-				buffer,
 				directory_entry_length,
 				filp->f_pos,
 				directory_entry_number + 1,
@@ -673,10 +671,10 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 				leavef();
 				return 0;
 			}
+			filp->f_pos += s;
+			filp->f_pos += directory_entry_length;
 		}
 
-		filp->f_pos += s;
-		filp->f_pos += directory_entry_length;
 		buffer += directory_entry_length;
 	}
 
@@ -860,6 +858,12 @@ static struct inode * smashfs_alloc_inode (struct super_block *sb)
 	return node ? &node->inode : NULL;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,4,0)
+static void smashfs_destroy_inode(struct inode *inode)
+{
+	kmem_cache_free(smashfs_inode_cachep, smashfs_i(inode));
+}
+#else
 static void smashfs_i_callback (struct rcu_head *head)
 {
 	struct inode *inode;
@@ -872,6 +876,7 @@ static void smashfs_destroy_inode(struct inode *inode)
 {
 	call_rcu(&inode->i_rcu, smashfs_i_callback);
 }
+#endif
 
 static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
 {

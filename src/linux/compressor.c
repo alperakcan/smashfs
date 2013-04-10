@@ -19,7 +19,7 @@
 
 #include <linux/module.h>
 
-#include "../include/smashfs.h"
+#include "smashfs.h"
 
 #include "compressor.h"
 #include "compressor-none.h"
