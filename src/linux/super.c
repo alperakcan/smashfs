@@ -858,12 +858,15 @@ static struct inode * smashfs_alloc_inode (struct super_block *sb)
 	return node ? &node->inode : NULL;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,4,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,38)
+
 static void smashfs_destroy_inode(struct inode *inode)
 {
 	kmem_cache_free(smashfs_inode_cachep, smashfs_i(inode));
 }
+
 #else
+
 static void smashfs_i_callback (struct rcu_head *head)
 {
 	struct inode *inode;
@@ -876,6 +879,7 @@ static void smashfs_destroy_inode(struct inode *inode)
 {
 	call_rcu(&inode->i_rcu, smashfs_i_callback);
 }
+
 #endif
 
 static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
