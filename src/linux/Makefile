@@ -11,8 +11,7 @@ SMASHFS_ENABLE_XZ   ?= y
 
 obj-m := ${MOD_NAME}.o
 
-${MOD_NAME}-objs  = fs.o
-${MOD_NAME}-objs += super.o
+${MOD_NAME}-objs  = super.o
 ${MOD_NAME}-objs += bitbuffer.o
 ${MOD_NAME}-objs += compressor.o
 ${MOD_NAME}-objs += compressor-none.o

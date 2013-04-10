@@ -27,5 +27,3 @@ struct smashfs_super_info {
 	unsigned char *blocks_table;
 	struct compressor *compressor;
 };
-
-int smashfs_fill_super (struct super_block *sb, void *data, int silent);

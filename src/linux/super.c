@@ -73,14 +73,26 @@ struct node {
 	long long parent;
 };
 
+struct node_info {
+	struct node node;
+	struct inode inode;
+};
+
 static const struct super_operations smashfs_super_ops;
 static const struct file_operations smashfs_directory_operations;
 static const struct inode_operations smashfs_dir_inode_operations;
 static const struct address_space_operations smashfs_aops;
 
+static struct kmem_cache *smashfs_inode_cachep = NULL;
+
 static DEFINE_MUTEX(read_mutex);
 
-static int block_fill (struct super_block *sb, long long number, struct block *block)
+static inline struct node_info * smashfs_i (struct inode *inode)
+{
+	return container_of(inode, struct node_info, inode);
+}
+
+static inline int block_fill (struct super_block *sb, long long number, struct block *block)
 {
 	int rc;
 	struct bitbuffer bb;
@@ -116,7 +128,7 @@ static int block_fill (struct super_block *sb, long long number, struct block *b
 	return 0;
 }
 
-static int node_fill (struct super_block *sb, long long number, struct node *node)
+static inline int node_fill (struct super_block *sb, long long number, struct node *node)
 {
 	int rc;
 	struct bitbuffer bb;
@@ -182,23 +194,16 @@ static int node_fill (struct super_block *sb, long long number, struct node *nod
 	return 0;
 }
 
-static struct inode * smashfs_get_inode (struct super_block *sb, long long number)
+static inline struct inode * smashfs_get_inode (struct super_block *sb, long long number)
 {
 	int rc;
 	mode_t mode;
 	struct node node;
 	struct inode *inode;
+	struct node_info *node_info;
 	struct smashfs_super_info *sbi;
 
 	enterf();
-
-	sbi = sb->s_fs_info;
-	rc = node_fill(sb, number, &node);
-	if (rc != 0) {
-		errorf("node fill failed\n");
-		leavef();
-		return ERR_PTR(-EINVAL);
-	}
 
 	inode = iget_locked(sb, number + 1);
 	if (inode == NULL) {
@@ -213,10 +218,18 @@ static struct inode * smashfs_get_inode (struct super_block *sb, long long numbe
 		return inode;
 	}
 
+	rc = node_fill(sb, number, &node);
+	if (rc != 0) {
+		errorf("node fill failed\n");
+		iget_failed(inode);
+		leavef();
+		return ERR_PTR(-EINVAL);
+	}
+
 	if (node.type == smashfs_inode_type_directory) {
-		mode         = S_IFDIR;
-		inode->i_op  = &smashfs_dir_inode_operations;
-		inode->i_fop = &smashfs_directory_operations;
+		mode                = S_IFDIR;
+		inode->i_op         = &smashfs_dir_inode_operations;
+		inode->i_fop        = &smashfs_directory_operations;
 	} else if (node.type == smashfs_inode_type_regular_file) {
 		mode                = S_IFREG;
 		inode->i_fop        = &generic_ro_fops;
@@ -260,6 +273,8 @@ static struct inode * smashfs_get_inode (struct super_block *sb, long long numbe
 		mode |= S_IXOTH;
 	}
 
+	sbi = sb->s_fs_info;
+
 	inode->i_mode   = mode;
 	inode->i_uid    = node.uid;
 	inode->i_gid    = node.gid;
@@ -268,13 +283,17 @@ static struct inode * smashfs_get_inode (struct super_block *sb, long long numbe
 	inode->i_ctime.tv_sec = node.ctime;
 	inode->i_mtime.tv_sec = node.mtime;
 	inode->i_atime.tv_sec = node.mtime;
+
+	node_info = smashfs_i(inode);
+	memcpy(&node_info->node, &node, sizeof(struct node));
+
 	unlock_new_inode(inode);
 
 	leavef();
 	return inode;
 }
 
-static int smashfs_read (struct super_block *sb, void *buffer, int offset, int length)
+static inline int smashfs_read (struct super_block *sb, void *buffer, int offset, int length)
 {
 	int i;
 	int b;
@@ -391,7 +410,7 @@ static int smashfs_read (struct super_block *sb, void *buffer, int offset, int l
 	return length;
 }
 
-static int node_read (struct super_block *sb, struct node *node, int (*function) (void *context, void *buffer, long long size), void *context, long long offset, long long size)
+static inline int node_read (struct super_block *sb, struct node *node, int (*function) (void *context, void *buffer, long long size), void *context, long long offset, long long size)
 {
 	int rc;
 	long long s;
@@ -519,7 +538,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 {
 	int rc;
 
-	struct node node;
+	struct node *node;
 	struct node enode;
 
 	char *buffer;
@@ -546,15 +565,10 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	sb = inode->i_sb;
 	sbi = sb->s_fs_info;
 
-	rc = node_fill(sb, inode->i_ino - 1, &node);
-	if (rc != 0) {
-		errorf("node fill failed\n");
-		leavef();
-		return -EINVAL;
-	}
+	node = &(smashfs_i(inode)->node);
 
-	if (filp->f_pos >= 3 + node.size) {
-		debugf("finished reading (%lld, %lld)\n", filp->f_pos, node.size);
+	if (filp->f_pos >= 3 + node->size) {
+		debugf("finished reading (%lld, %lld)\n", filp->f_pos, node->size);
 		leavef();
 		return 0;
 	}
@@ -569,7 +583,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		} else {
 			name = "..";
 			s = 2;
-			i_ino = node.parent + 1;
+			i_ino = node->parent + 1;
 		}
 		debugf("calling filldir(%p, %s, %lld, %lld, %d, %d)\n", dirent, name, s, filp->f_pos, i_ino, DT_DIR);
 		if (filldir(dirent, name, s, filp->f_pos, i_ino, DT_DIR) < 0) {
@@ -580,7 +594,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		filp->f_pos += s;
 	}
 
-	nbuffer = kmalloc(node.size, GFP_KERNEL);
+	nbuffer = kmalloc(node->size, GFP_KERNEL);
 	if (nbuffer == NULL) {
 		errorf("kmalloc failed\n");
 		leavef();
@@ -588,7 +602,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	}
 
 	buffer = nbuffer;
-	rc = node_read(sb, &node, node_read_directory, &buffer, 0, node.size);
+	rc = node_read(sb, node, node_read_directory, &buffer, 0, node->size);
 	if (rc != 0) {
 		errorf("node read failed\n");
 		kfree(nbuffer);
@@ -597,12 +611,12 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	}
 
 	buffer = nbuffer;
-	bitbuffer_init_from_buffer(&bb, buffer, node.size);
+	bitbuffer_init_from_buffer(&bb, buffer, node->size);
 	directory_parent   = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.parent);
 	directory_nentries = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.nentries);
 	bitbuffer_uninit(&bb);
 
-	debugf("number: %lld, parent: %lld, nentries: %lld\n", node.number, directory_parent, directory_nentries);
+	debugf("number: %lld, parent: %lld, nentries: %lld\n", node->number, directory_parent, directory_nentries);
 	s  = 0;
 	s += sbi->super->bits.inode.directory.parent;
 	s += sbi->super->bits.inode.directory.nentries;
@@ -625,7 +639,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 
 		buffer += s;
 
-		debugf("  - %s (number: %lld)\n", buffer, directory_entry_number);
+		debugf("  - %lld\n", directory_entry_number);
 		rc = node_fill(sb, directory_entry_number, &enode);
 		if (rc != 0) {
 			errorf("node fill failed\n");
@@ -682,7 +696,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 {
 	int rc;
 
-	struct node node;
+	struct node *node;
 
 	char *buffer;
 	char *nbuffer;
@@ -706,14 +720,9 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	sb = dir->i_sb;
 	sbi = sb->s_fs_info;
 
-	rc = node_fill(sb, dir->i_ino - 1, &node);
-	if (rc != 0) {
-		errorf("node fill failed\n");
-		leavef();
-		return ERR_PTR(-EINVAL);
-	}
+	node = &(smashfs_i(dir)->node);
 
-	nbuffer = kmalloc(node.size, GFP_KERNEL);
+	nbuffer = kmalloc(node->size, GFP_KERNEL);
 	if (nbuffer == NULL) {
 		errorf("kmalloc failed\n");
 		leavef();
@@ -721,7 +730,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	}
 
 	buffer = nbuffer;
-	rc = node_read(sb, &node, node_read_directory, &buffer, 0, node.size);
+	rc = node_read(sb, node, node_read_directory, &buffer, 0, node->size);
 	if (rc != 0) {
 		errorf("node read failed\n");
 		kfree(nbuffer);
@@ -730,12 +739,12 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	}
 
 	buffer = nbuffer;
-	bitbuffer_init_from_buffer(&bb, buffer, node.size);
+	bitbuffer_init_from_buffer(&bb, buffer, node->size);
 	directory_parent   = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.parent);
 	directory_nentries = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.nentries);
 	bitbuffer_uninit(&bb);
 
-	debugf("number: %lld, parent: %lld, nentries: %lld\n", node.number, directory_parent, directory_nentries);
+	debugf("number: %lld, parent: %lld, nentries: %lld\n", node->number, directory_parent, directory_nentries);
 	s  = 0;
 	s += sbi->super->bits.inode.directory.parent;
 	s += sbi->super->bits.inode.directory.nentries;
@@ -761,7 +770,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 
 		if (directory_entry_length == dentry->d_name.len &&
 		    memcmp(buffer, dentry->d_name.name, dentry->d_name.len) == 0) {
-			debugf("  - %s (number: %lld)\n", buffer, directory_entry_number);
+			debugf("  - %lld\n", directory_entry_number);
 			inode = smashfs_get_inode(sb, directory_entry_number);
 			if (inode == NULL) {
 				errorf("get inode failed\n");
@@ -790,7 +799,7 @@ static int smashfs_readpage (struct file *file, struct page *page)
 	char *buffer;
 	char *nbuffer;
 	long long size;
-	struct node node;
+	struct node *node;
 	struct inode *inode;
 	struct super_block *sb;
 
@@ -799,26 +808,22 @@ static int smashfs_readpage (struct file *file, struct page *page)
 	inode = page->mapping->host;
 	sb = inode->i_sb;
 
-	rc = node_fill(sb, inode->i_ino - 1, &node);
-	if (rc != 0) {
-		errorf("node fill failed\n");
-		goto bail;
-	}
+	node = &(smashfs_i(inode)->node);
 
 	max_block = (inode->i_size + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
 	bytes_filled = 0;
 	pgdata = kmap(page);
 
-	debugf("page index: %ld, node size: %lld, max block: %d\n", page->index, node.size, max_block);
+	debugf("page index: %ld, node size: %lld, max block: %d\n", page->index, node->size, max_block);
 	if (page->index < max_block) {
-		if (node.type == smashfs_inode_type_symbolic_link) {
-			nbuffer = kmalloc(node.size, GFP_KERNEL);
+		if (node->type == smashfs_inode_type_symbolic_link) {
+			nbuffer = kmalloc(node->size, GFP_KERNEL);
 			if (nbuffer == NULL) {
 				errorf("kmalloc failed\n");
 				goto bail;
 			}
 			buffer = nbuffer;
-			rc = node_read(sb, &node, node_read_symbolic_link, &buffer, 0, node.size);
+			rc = node_read(sb, node, node_read_symbolic_link, &buffer, 0, node->size);
 			if (rc != 0) {
 				errorf("node read failed\n");
 				kfree(nbuffer);
@@ -826,14 +831,14 @@ static int smashfs_readpage (struct file *file, struct page *page)
 				goto bail;
 			}
 			buffer = nbuffer;
-			size = min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
+			size = min_t(long long, node->size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
 			memcpy(pgdata, buffer + (page->index * PAGE_CACHE_SIZE), size);
 			bytes_filled = size;
 			kfree(nbuffer);
-		} else if (node.type == smashfs_inode_type_regular_file) {
+		} else if (node->type == smashfs_inode_type_regular_file) {
 			buffer = pgdata;
-			size = min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
-			rc = node_read(sb, &node, node_read_regular_file, &buffer, page->index * PAGE_CACHE_SIZE, size);
+			size = min_t(long long, node->size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
+			rc = node_read(sb, node, node_read_regular_file, &buffer, page->index * PAGE_CACHE_SIZE, size);
 			if (rc != 0) {
 				errorf("node read failed\n");
 				leavef();
@@ -841,7 +846,7 @@ static int smashfs_readpage (struct file *file, struct page *page)
 			}
 			bytes_filled = size;
 		} else {
-			errorf("unknown node type: %lld\n", node.type);
+			errorf("unknown node type: %lld\n", node->type);
 			goto bail;
 		}
 	}
@@ -861,6 +866,26 @@ bail:
 	unlock_page(page);
 	leavef();
 	return 0;
+}
+
+static struct inode * smashfs_alloc_inode (struct super_block *sb)
+{
+	struct node_info *node;
+	node = kmem_cache_alloc(smashfs_inode_cachep, GFP_KERNEL);
+	return node ? &node->inode : NULL;
+}
+
+static void smashfs_i_callback (struct rcu_head *head)
+{
+	struct inode *inode;
+	inode = container_of(head, struct inode, i_rcu);
+	INIT_LIST_HEAD(&inode->i_dentry);
+	kmem_cache_free(smashfs_inode_cachep, smashfs_i(inode));
+}
+
+static void smashfs_destroy_inode(struct inode *inode)
+{
+	call_rcu(&inode->i_rcu, smashfs_i_callback);
 }
 
 static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
@@ -935,12 +960,35 @@ static const struct address_space_operations smashfs_aops = {
 };
 
 static const struct super_operations smashfs_super_ops = {
+	.alloc_inode   = smashfs_alloc_inode,
+	.destroy_inode = smashfs_destroy_inode,
 	.statfs        = smashfs_statfs,
 	.put_super     = smashfs_put_super,
 	.remount_fs    = smashfs_remount
 };
 
-int smashfs_fill_super (struct super_block *sb, void *data, int silent)
+static void init_once (void *foo)
+{
+	struct node_info *node;
+	node = foo;
+	inode_init_once(&node->inode);
+}
+
+static int init_inodecache (void)
+{
+	smashfs_inode_cachep = kmem_cache_create("smashfs_inode_cache", sizeof(struct node_info), 0, SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT, init_once);
+	return smashfs_inode_cachep ? 0 : -ENOMEM;
+}
+
+
+static void destroy_inodecache (void)
+{
+	if (smashfs_inode_cachep != NULL) {
+		kmem_cache_destroy(smashfs_inode_cachep);
+	}
+}
+
+static int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 {
 	int rc;
 	char b[BDEVNAME_SIZE];
@@ -1150,3 +1198,42 @@ bail:
 	leavef();
 	return -EINVAL;
 }
+
+static struct dentry * smashfs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
+{
+	return mount_bdev(fs_type, flags, dev_name, data, smashfs_fill_super);
+}
+
+static struct file_system_type smashfs_fs_type = {
+	.owner		= THIS_MODULE,
+	.name		= "smashfs",
+	.mount		= smashfs_mount,
+	.kill_sb	= kill_block_super,
+	.fs_flags	= FS_REQUIRES_DEV,
+};
+
+static int __init init_smashfs_fs (void)
+{
+	int rc;
+	rc = init_inodecache();
+	if (rc != 0) {
+		errorf("inode cache init failed\n");
+		goto bail;
+	}
+	rc = register_filesystem(&smashfs_fs_type);
+	printk(KERN_INFO "smashfs: (c) 2013 Alper Akcan\n");
+	return rc;
+bail:
+	destroy_inodecache();
+	return rc;
+}
+
+static void __exit exit_smashfs_fs (void)
+{
+	unregister_filesystem(&smashfs_fs_type);
+	destroy_inodecache();
+}
+
+module_init(init_smashfs_fs)
+module_exit(exit_smashfs_fs)
+MODULE_LICENSE("GPL");
