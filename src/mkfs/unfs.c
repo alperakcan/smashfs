@@ -228,6 +228,7 @@ static void traverse (long long inode, const char *name, long long level)
 {
 	int rc;
 	int fd;
+	char *path;
 	mode_t mode;
 	long long e;
 	long long l;
@@ -235,6 +236,7 @@ static void traverse (long long inode, const char *name, long long level)
 	long long directory_parent;
 	long long directory_nentries;
 	long long directory_entry_number;
+	long long directory_entry_length;
 	unsigned char *buffer;
 	unsigned char *nbuffer;
 	struct node node;
@@ -337,13 +339,21 @@ static void traverse (long long inode, const char *name, long long level)
 		for (e = 0; e < directory_nentries; e++) {
 			s  = 0;
 			s += super.bits.inode.directory.entries.number;
+			s += super.bits.inode.directory.entries.length;
 			s  = (s + 7) / 8;
 			bitbuffer_init_from_buffer(&bitbuffer, buffer, s);
 			directory_entry_number = bitbuffer_getbits(&bitbuffer, super.bits.inode.directory.entries.number);
+			directory_entry_length = bitbuffer_getbits(&bitbuffer, super.bits.inode.directory.entries.length);
 			bitbuffer_uninit(&bitbuffer);
 			buffer += s;
-			traverse(directory_entry_number, (char *) buffer, level + 1);
-			buffer += strlen((char *) buffer) + 1;
+			path = strndup((char *) buffer, directory_entry_length);
+			if (path == NULL) {
+				fprintf(stderr, "strndup failed\n");
+			} else {
+				traverse(directory_entry_number, path, level + 1);
+				free(path);
+			}
+			buffer += directory_entry_length;
 		}
 		rc = chdir("..");
 		if (rc != 0) {
@@ -551,6 +561,7 @@ int main (int argc, char *argv[])
 		fprintf(stdout, "          nentries : %u\n", super.bits.inode.directory.nentries);
 		fprintf(stdout, "          entries:\n");
 		fprintf(stdout, "            number : %u\n", super.bits.inode.directory.entries.number);
+		fprintf(stdout, "            length : %u\n", super.bits.inode.directory.entries.length);
 		fprintf(stdout, "        symbolic_link:\n");
 		fprintf(stdout, "      block:\n");
 		fprintf(stdout, "        offset         : %u\n", super.bits.block.offset);

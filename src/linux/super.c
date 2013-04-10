@@ -35,9 +35,13 @@
 	printk(KERN_ERR "smashfs: " a); \
 }
 
+#if 0
 #define debugf(a...) { \
 	printk(KERN_INFO "smashfs: " a); \
 }
+#else
+#define debugf(a...)
+#endif
 
 #define enterf() { \
 	debugf("enter (%s %s:%d)\n", __FUNCTION__, __FILE__, __LINE__); \
@@ -395,6 +399,7 @@ static int node_read (struct super_block *sb, struct node *node, int (*function)
 	long long b;
 	long long n;
 	long long o;
+	long long l;
 	void *ubuffer;
 	void *cbuffer;
 	struct block block;
@@ -446,12 +451,13 @@ static int node_read (struct super_block *sb, struct node *node, int (*function)
 			errorf("uncompress failed");
 			goto bail;
 		}
-		rc = function(context, ubuffer + i, min_t(long long, size - s, block.size - i));
-		if (rc != min_t(long long, size - s, block.size - i)) {
+		l = min_t(long long, size - s, block.size - i);
+		rc = function(context, ubuffer + i, l);
+		if (rc != l) {
 			errorf("function failed\n");
 			goto bail;
 		}
-		s += min_t(long long, size - s, block.size - i);
+		s += l;
 		b += 1;
 		i = 0;
 	}
@@ -529,6 +535,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	long long directory_parent;
 	long long directory_nentries;
 	long long directory_entry_number;
+	long long directory_entry_length;
 
 	enterf();
 
@@ -607,10 +614,12 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	for (e = 0; e < directory_nentries; e++) {
 		s  = 0;
 		s += sbi->super->bits.inode.directory.entries.number;
+		s += sbi->super->bits.inode.directory.entries.length;
 		s  = (s + 7) / 8;
 
 		bitbuffer_init_from_buffer(&bb, buffer, s);
 		directory_entry_number = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.number);
+		directory_entry_length = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.length);
 		bitbuffer_uninit(&bb);
 
 		buffer += s;
@@ -629,7 +638,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 			debugf("    calling filldir(%p, %s, %zd, %lld, %lld, %s)\n",
 				dirent,
 				buffer,
-				strlen(buffer),
+				directory_entry_length,
 				filp->f_pos,
 				directory_entry_number + 1,
 				(enode.type == smashfs_inode_type_regular_file) ? "DT_REG" :
@@ -641,7 +650,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 				(enode.type == smashfs_inode_type_socket) ? "DT_SOCK" : "DT_UNKNOWN");
 			if (filldir(dirent,
 				    buffer,
-				    strlen(buffer),
+				    directory_entry_length,
 				    filp->f_pos,
 				    directory_entry_number,
 				    (enode.type == smashfs_inode_type_regular_file) ? DT_REG :
@@ -659,8 +668,8 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		}
 
 		filp->f_pos += s;
-		filp->f_pos += strlen(buffer) + 1;
-		buffer += strlen(buffer) + 1;
+		filp->f_pos += directory_entry_length;
+		buffer += directory_entry_length;
 	}
 
 	kfree(nbuffer);
@@ -687,6 +696,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	long long directory_parent;
 	long long directory_nentries;
 	long long directory_entry_number;
+	long long directory_entry_length;
 
 	enterf();
 
@@ -733,16 +743,18 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	for (e = 0; e < directory_nentries; e++) {
 		s  = 0;
 		s += sbi->super->bits.inode.directory.entries.number;
+		s += sbi->super->bits.inode.directory.entries.length;
 		s  = (s + 7) / 8;
 
 		bitbuffer_init_from_buffer(&bb, buffer, s);
 		directory_entry_number = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.number);
+		directory_entry_length = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.length);
 		bitbuffer_uninit(&bb);
 
 		buffer += s;
 
-		if (strlen(buffer) == dentry->d_name.len &&
-		    strncmp(buffer, dentry->d_name.name, dentry->d_name.len) == 0) {
+		if (directory_entry_length == dentry->d_name.len &&
+		    memcmp(buffer, dentry->d_name.name, dentry->d_name.len) == 0) {
 			debugf("  - %s (number: %lld)\n", buffer, directory_entry_number);
 			inode = smashfs_get_inode(sb, directory_entry_number);
 			if (inode == NULL) {
@@ -755,7 +767,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 			}
 		}
 
-		buffer += strlen(buffer) + 1;
+		buffer += directory_entry_length;
 	}
 
 	kfree(nbuffer);
@@ -771,6 +783,7 @@ static int smashfs_readpage (struct file *file, struct page *page)
 	void *pgdata;
 	char *buffer;
 	char *nbuffer;
+	long long size;
 	struct node node;
 	struct inode *inode;
 	struct super_block *sb;
@@ -807,18 +820,20 @@ static int smashfs_readpage (struct file *file, struct page *page)
 				goto bail;
 			}
 			buffer = nbuffer;
-			memcpy(pgdata, buffer + (page->index * PAGE_CACHE_SIZE), min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE));
-			bytes_filled = min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
+			size = min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
+			memcpy(pgdata, buffer + (page->index * PAGE_CACHE_SIZE), size);
+			bytes_filled = size;
 			kfree(nbuffer);
 		} else if (node.type == smashfs_inode_type_regular_file) {
 			buffer = pgdata;
-			rc = node_read(sb, &node, node_read_regular_file, &buffer, page->index * PAGE_CACHE_SIZE, min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE));
+			size = min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
+			rc = node_read(sb, &node, node_read_regular_file, &buffer, page->index * PAGE_CACHE_SIZE, size);
 			if (rc != 0) {
 				errorf("node read failed\n");
 				leavef();
 				goto bail;
 			}
-			bytes_filled = min_t(long long, node.size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
+			bytes_filled = size;
 		} else {
 			errorf("unknown node type: %lld\n", node.type);
 			goto bail;
@@ -944,6 +959,7 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	sbi->blocks_table = NULL;
 	sbi->inodes_table = NULL;
 
+	(void) b;
 	debugf("devname: %s\n", bdevname(sb->s_bdev, b));
 
 	sbi->devblksize = sb_min_blocksize(sb, BLOCK_SIZE);
@@ -1010,6 +1026,7 @@ int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	debugf("        nentries : %u\n", sbl->bits.inode.directory.nentries);
 	debugf("        entries:\n");
 	debugf("          number : %u\n", sbl->bits.inode.directory.entries.number);
+	debugf("          length : %u\n", sbl->bits.inode.directory.entries.length);
 	debugf("      symbolic_link:\n");
 	debugf("    block:\n");
 	debugf("      offset         : %u\n", sbl->bits.block.offset);
