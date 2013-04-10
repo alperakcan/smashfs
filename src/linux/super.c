@@ -70,7 +70,6 @@ struct node {
 	long long size;
 	long long block;
 	long long index;
-	long long parent;
 };
 
 struct node_info {
@@ -161,7 +160,6 @@ static inline int node_fill (struct super_block *sb, long long number, struct no
 	node->size       = bitbuffer_getbits(&bb, sbi->super->bits.inode.size);
 	node->block      = bitbuffer_getbits(&bb, sbi->super->bits.inode.block);
 	node->index      = bitbuffer_getbits(&bb, sbi->super->bits.inode.index);
-	node->parent     = bitbuffer_getbits(&bb, sbi->super->bits.inode.parent);
 	bitbuffer_uninit(&bb);
 
 	if (sbi->super->bits.inode.group_mode == 0) {
@@ -573,27 +571,6 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		return 0;
 	}
 
-	while (filp->f_pos < 3) {
-		int i_ino;
-		char *name;
-		if (filp->f_pos == 0) {
-			name = ".";
-			s = 1;
-			i_ino = inode->i_ino;
-		} else {
-			name = "..";
-			s = 2;
-			i_ino = node->parent + 1;
-		}
-		debugf("calling filldir(%p, %s, %lld, %lld, %d, %d)\n", dirent, name, s, filp->f_pos, i_ino, DT_DIR);
-		if (filldir(dirent, name, s, filp->f_pos, i_ino, DT_DIR) < 0) {
-			debugf("filldir failed\n");
-			leavef();
-			return 0;
-		}
-		filp->f_pos += s;
-	}
-
 	nbuffer = kmalloc(node->size, GFP_KERNEL);
 	if (nbuffer == NULL) {
 		errorf("kmalloc failed\n");
@@ -615,6 +592,28 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	directory_parent   = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.parent);
 	directory_nentries = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.nentries);
 	bitbuffer_uninit(&bb);
+
+	while (filp->f_pos < 3) {
+		int i_ino;
+		char *name;
+		if (filp->f_pos == 0) {
+			name = ".";
+			s = 1;
+			i_ino = inode->i_ino;
+		} else {
+			name = "..";
+			s = 2;
+			i_ino = directory_parent + 1;
+		}
+		debugf("calling filldir(%p, %s, %lld, %lld, %d, %d)\n", dirent, name, s, filp->f_pos, i_ino, DT_DIR);
+		if (filldir(dirent, name, s, filp->f_pos, i_ino, DT_DIR) < 0) {
+			debugf("filldir failed\n");
+			kfree(nbuffer);
+			leavef();
+			return 0;
+		}
+		filp->f_pos += s;
+	}
 
 	debugf("number: %lld, parent: %lld, nentries: %lld\n", node->number, directory_parent, directory_nentries);
 	s  = 0;
@@ -667,7 +666,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 				    buffer,
 				    directory_entry_length,
 				    filp->f_pos,
-				    directory_entry_number,
+				    directory_entry_number + 1,
 				    (enode.type == smashfs_inode_type_regular_file) ? DT_REG :
 				    (enode.type == smashfs_inode_type_directory) ? DT_DIR :
 				    (enode.type == smashfs_inode_type_symbolic_link) ? DT_LNK :
@@ -797,7 +796,6 @@ static int smashfs_readpage (struct file *file, struct page *page)
 	int max_block;
 	void *pgdata;
 	char *buffer;
-	char *nbuffer;
 	long long size;
 	struct node *node;
 	struct inode *inode;
@@ -817,24 +815,15 @@ static int smashfs_readpage (struct file *file, struct page *page)
 	debugf("page index: %ld, node size: %lld, max block: %d\n", page->index, node->size, max_block);
 	if (page->index < max_block) {
 		if (node->type == smashfs_inode_type_symbolic_link) {
-			nbuffer = kmalloc(node->size, GFP_KERNEL);
-			if (nbuffer == NULL) {
-				errorf("kmalloc failed\n");
-				goto bail;
-			}
-			buffer = nbuffer;
-			rc = node_read(sb, node, node_read_symbolic_link, &buffer, 0, node->size);
+			buffer = pgdata;
+			size = min_t(long long, node->size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
+			rc = node_read(sb, node, node_read_symbolic_link, &buffer, page->index * PAGE_CACHE_SIZE, size);
 			if (rc != 0) {
 				errorf("node read failed\n");
-				kfree(nbuffer);
 				leavef();
 				goto bail;
 			}
-			buffer = nbuffer;
-			size = min_t(long long, node->size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
-			memcpy(pgdata, buffer + (page->index * PAGE_CACHE_SIZE), size);
 			bytes_filled = size;
-			kfree(nbuffer);
 		} else if (node->type == smashfs_inode_type_regular_file) {
 			buffer = pgdata;
 			size = min_t(long long, node->size - (page->index * PAGE_CACHE_SIZE), PAGE_CACHE_SIZE);
@@ -1105,7 +1094,6 @@ static int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	sbi->max_inode_size += sbl->bits.inode.size;
 	sbi->max_inode_size += sbl->bits.inode.block;
 	sbi->max_inode_size += sbl->bits.inode.index;
-	sbi->max_inode_size += sbl->bits.inode.parent;
 
 	sbi->inodes_table = kmalloc(sbl->inodes_size, GFP_KERNEL);
 	if (sbi->inodes_table == NULL) {
