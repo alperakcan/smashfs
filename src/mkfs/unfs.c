@@ -338,10 +338,12 @@ static void traverse (long long inode, const char *name, long long level)
 			s  = 0;
 			s += super.bits.inode.directory.entries.number;
 			s += super.bits.inode.directory.entries.length;
+			s += super.bits.inode.directory.entries.type;
 			s  = (s + 7) / 8;
 			bitbuffer_init_from_buffer(&bitbuffer, buffer, s);
 			directory_entry_number = bitbuffer_getbits(&bitbuffer, super.bits.inode.directory.entries.number);
 			directory_entry_length = bitbuffer_getbits(&bitbuffer, super.bits.inode.directory.entries.length);
+			/* directory_entry_type */ bitbuffer_skipbits(&bitbuffer, super.bits.inode.directory.entries.type);
 			bitbuffer_uninit(&bitbuffer);
 			buffer += s;
 			path = strndup((char *) buffer, directory_entry_length);
@@ -559,6 +561,7 @@ int main (int argc, char *argv[])
 		fprintf(stdout, "          entries:\n");
 		fprintf(stdout, "            number : %u\n", super.bits.inode.directory.entries.number);
 		fprintf(stdout, "            length : %u\n", super.bits.inode.directory.entries.length);
+		fprintf(stdout, "            type   : %u\n", super.bits.inode.directory.entries.type);
 		fprintf(stdout, "        symbolic_link:\n");
 		fprintf(stdout, "      block:\n");
 		fprintf(stdout, "        offset         : %u\n", super.bits.block.offset);

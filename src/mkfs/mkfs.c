@@ -71,6 +71,7 @@ struct node_regular_file {
 struct node_directory_entry {
 	long long number;
 	long long length;
+	long long type;
 	char name[0];
 };
 
@@ -289,6 +290,7 @@ static int output_write (void)
 	long long max_inode_directory_nentries;
 	long long max_inode_directory_entries_number;
 	long long max_inode_directory_entries_length;
+	long long max_inode_directory_entries_type;
 
 	long long max_block_offset;
 	long long max_block_size;
@@ -337,6 +339,7 @@ static int output_write (void)
 	max_inode_directory_nentries       = -1;
 	max_inode_directory_entries_number = -1;
 	max_inode_directory_entries_length = -1;
+	max_inode_directory_entries_type   = -1;
 
 	HASH_ITER(hh, nodes_table, node, nnode) {
 		max_inode_number     = MAX(max_inode_number, node->number);
@@ -358,6 +361,7 @@ static int output_write (void)
 			for (e = 0; e < node->directory->nentries; e++) {
 				max_inode_directory_entries_number = MAX(max_inode_directory_entries_number, ((struct node_directory_entry *) (((unsigned char *) node->directory) + size))->number);
 				max_inode_directory_entries_length = MAX(max_inode_directory_entries_length, ((struct node_directory_entry *) (((unsigned char *) node->directory) + size))->length);
+				max_inode_directory_entries_type   = MAX(max_inode_directory_entries_type  , ((struct node_directory_entry *) (((unsigned char *) node->directory) + size))->type);
 				size += sizeof(struct node_directory_entry) + ((struct node_directory_entry *) (((unsigned char *) node->directory) + size))->length;
 			}
 		} else if (node->type == smashfs_inode_type_symbolic_link) {
@@ -400,6 +404,7 @@ static int output_write (void)
 	super.bits.inode.directory.nentries       = blog(max_inode_directory_nentries);
 	super.bits.inode.directory.entries.number = blog(max_inode_directory_entries_number);
 	super.bits.inode.directory.entries.length = blog(max_inode_directory_entries_length);
+	super.bits.inode.directory.entries.type   = blog(max_inode_directory_entries_type);
 
 	fprintf(stdout, "  sorting inodes table by type\n");
 
@@ -451,6 +456,7 @@ static int output_write (void)
 				size  = 0;
 				size += super.bits.inode.directory.entries.number;
 				size += super.bits.inode.directory.entries.length;
+				size += super.bits.inode.directory.entries.type;
 				size  = (size + 7) / 8;
 				rc = bitbuffer_init(&bitbuffer, size);
 				if (rc != 0) {
@@ -459,6 +465,7 @@ static int output_write (void)
 				}
 				bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.entries.number, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->number);
 				bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.entries.length, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->length);
+				bitbuffer_putbits(&bitbuffer, super.bits.inode.directory.entries.type, ((struct node_directory_entry *) (((unsigned char *) node->directory) + s))->type);
 				rc = buffer_add(&entry_buffer, bitbuffer_buffer(&bitbuffer), size);
 				if (rc < 0) {
 					fprintf(stdout, "buffer add failed\n");
@@ -747,6 +754,7 @@ static int output_write (void)
 		fprintf(stdout, "          entries:\n");
 		fprintf(stdout, "            number : %u\n", super.bits.inode.directory.entries.number);
 		fprintf(stdout, "            length : %u\n", super.bits.inode.directory.entries.length);
+		fprintf(stdout, "            type   : %u\n", super.bits.inode.directory.entries.type);
 		fprintf(stdout, "        symbolic_link:\n");
 		fprintf(stdout, "      block:\n");
 		fprintf(stdout, "        offset         : %u\n", super.bits.block.offset);
@@ -1054,6 +1062,7 @@ static struct node * node_new (FTSENT *entry)
 	directory_entry = (struct node_directory_entry *) (((unsigned char *) directory) + s);
 	directory_entry->number = node->number;
 	directory_entry->length = strlen(entry->fts_name);
+	directory_entry->type   = node->type;
 	memcpy(directory_entry->name, entry->fts_name, strlen(entry->fts_name));
 	directory->nentries += 1;
 	free(parent->directory);

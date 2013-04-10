@@ -97,6 +97,7 @@ struct smashfs_super_block {
 				struct {
 					uint32_t number;
 					uint32_t length;
+					uint32_t type;
 					char path[0];
 				} entries;
 			} directory;

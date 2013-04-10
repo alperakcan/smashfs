@@ -537,7 +537,6 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	int rc;
 
 	struct node *node;
-	struct node enode;
 
 	char *buffer;
 	char *nbuffer;
@@ -553,6 +552,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	long long directory_nentries;
 	long long directory_entry_number;
 	long long directory_entry_length;
+	long long directory_entry_type;
 
 	enterf();
 
@@ -629,24 +629,18 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		s  = 0;
 		s += sbi->super->bits.inode.directory.entries.number;
 		s += sbi->super->bits.inode.directory.entries.length;
+		s += sbi->super->bits.inode.directory.entries.type;
 		s  = (s + 7) / 8;
 
 		bitbuffer_init_from_buffer(&bb, buffer, s);
 		directory_entry_number = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.number);
 		directory_entry_length = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.length);
+		directory_entry_type = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.type);
 		bitbuffer_uninit(&bb);
 
 		buffer += s;
 
 		debugf("  - %lld\n", directory_entry_number);
-		rc = node_fill(sb, directory_entry_number, &enode);
-		if (rc != 0) {
-			errorf("node fill failed\n");
-			kfree(nbuffer);
-			leavef();
-			return -EINVAL;
-		}
-
 		debugf("    filp->f_pos: %lld, %zd\n", filp->f_pos, ((buffer - s) - nbuffer) + 3);
 		if (filp->f_pos == ((buffer - s) - nbuffer) + 3) {
 			debugf("    calling filldir(%p, %s, %lld, %lld, %lld, %s)\n",
@@ -655,25 +649,25 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 				directory_entry_length,
 				filp->f_pos,
 				directory_entry_number + 1,
-				(enode.type == smashfs_inode_type_regular_file) ? "DT_REG" :
-				(enode.type == smashfs_inode_type_directory) ? "DT_DIR" :
-				(enode.type == smashfs_inode_type_symbolic_link) ? "DT_LNK" :
-				(enode.type == smashfs_inode_type_character_device) ? "DT_CHR" :
-				(enode.type == smashfs_inode_type_block_device) ? "DT_BLK" :
-				(enode.type == smashfs_inode_type_fifo) ? "DT_FIFO" :
-				(enode.type == smashfs_inode_type_socket) ? "DT_SOCK" : "DT_UNKNOWN");
+				(directory_entry_type == smashfs_inode_type_regular_file) ? "DT_REG" :
+				(directory_entry_type == smashfs_inode_type_directory) ? "DT_DIR" :
+				(directory_entry_type == smashfs_inode_type_symbolic_link) ? "DT_LNK" :
+				(directory_entry_type == smashfs_inode_type_character_device) ? "DT_CHR" :
+				(directory_entry_type == smashfs_inode_type_block_device) ? "DT_BLK" :
+				(directory_entry_type == smashfs_inode_type_fifo) ? "DT_FIFO" :
+				(directory_entry_type == smashfs_inode_type_socket) ? "DT_SOCK" : "DT_UNKNOWN");
 			if (filldir(dirent,
 				    buffer,
 				    directory_entry_length,
 				    filp->f_pos,
 				    directory_entry_number + 1,
-				    (enode.type == smashfs_inode_type_regular_file) ? DT_REG :
-				    (enode.type == smashfs_inode_type_directory) ? DT_DIR :
-				    (enode.type == smashfs_inode_type_symbolic_link) ? DT_LNK :
-				    (enode.type == smashfs_inode_type_character_device) ? DT_CHR :
-				    (enode.type == smashfs_inode_type_block_device) ? DT_BLK :
-				    (enode.type == smashfs_inode_type_fifo) ? DT_FIFO :
-				    (enode.type == smashfs_inode_type_socket) ? DT_SOCK : DT_UNKNOWN) < 0) {
+				    (directory_entry_type == smashfs_inode_type_regular_file) ? DT_REG :
+				    (directory_entry_type == smashfs_inode_type_directory) ? DT_DIR :
+				    (directory_entry_type == smashfs_inode_type_symbolic_link) ? DT_LNK :
+				    (directory_entry_type == smashfs_inode_type_character_device) ? DT_CHR :
+				    (directory_entry_type == smashfs_inode_type_block_device) ? DT_BLK :
+				    (directory_entry_type == smashfs_inode_type_fifo) ? DT_FIFO :
+				    (directory_entry_type == smashfs_inode_type_socket) ? DT_SOCK : DT_UNKNOWN) < 0) {
 				debugf("filldir failed\n");
 				kfree(nbuffer);
 				leavef();
@@ -754,11 +748,13 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 		s  = 0;
 		s += sbi->super->bits.inode.directory.entries.number;
 		s += sbi->super->bits.inode.directory.entries.length;
+		s += sbi->super->bits.inode.directory.entries.type;
 		s  = (s + 7) / 8;
 
 		bitbuffer_init_from_buffer(&bb, buffer, s);
 		directory_entry_number = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.number);
 		directory_entry_length = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.entries.length);
+		/* directory_entry_type */ bitbuffer_skipbits(&bb, sbi->super->bits.inode.directory.entries.type);
 		bitbuffer_uninit(&bb);
 
 		buffer += s;
