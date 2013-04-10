@@ -603,7 +603,8 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	bitbuffer_uninit(&bb);
 
 	debugf("number: %lld, parent: %lld, nentries: %lld\n", node.number, directory_parent, directory_nentries);
-	s  = sbi->super->bits.inode.directory.parent;
+	s  = 0;
+	s += sbi->super->bits.inode.directory.parent;
 	s += sbi->super->bits.inode.directory.nentries;
 	s  = (s + 7) / 8;
 	buffer += s;
@@ -735,7 +736,8 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	bitbuffer_uninit(&bb);
 
 	debugf("number: %lld, parent: %lld, nentries: %lld\n", node.number, directory_parent, directory_nentries);
-	s  = sbi->super->bits.inode.directory.parent;
+	s  = 0;
+	s += sbi->super->bits.inode.directory.parent;
 	s += sbi->super->bits.inode.directory.nentries;
 	s  = (s + 7) / 8;
 	buffer += s;
@@ -752,6 +754,10 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 		bitbuffer_uninit(&bb);
 
 		buffer += s;
+
+		if (dentry->d_name.name[0] < buffer[0]) {
+			break;
+		}
 
 		if (directory_entry_length == dentry->d_name.len &&
 		    memcmp(buffer, dentry->d_name.name, dentry->d_name.len) == 0) {

@@ -1092,6 +1092,11 @@ bail:
 	return NULL;
 }
 
+static int fts_compare (const FTSENT **a, const FTSENT **b)
+{
+	return strcmp((*a)->fts_name, (*b)->fts_name);
+}
+
 static void sources_scan (void)
 {
 	FTS *tree;
@@ -1117,7 +1122,7 @@ static void sources_scan (void)
 		nsources += 1;
 	}
 	spaths[nsources] = NULL;
-	tree = fts_open(spaths, FTS_COMFOLLOW /* | FTS_NOCHDIR */ | FTS_PHYSICAL /* | FTS_SEEDOT */, NULL);
+	tree = fts_open(spaths, FTS_COMFOLLOW /* | FTS_NOCHDIR */ | FTS_PHYSICAL /* | FTS_SEEDOT */, fts_compare);
 	if (tree == NULL) {
 		fprintf(stderr, "fts_open failed\n");
 		free(spaths);
