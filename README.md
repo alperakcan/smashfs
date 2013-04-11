@@ -43,6 +43,10 @@ a smashed filesystem has four main blocks
 
 a smashed filesystem is created with the tool <tt>mkfs.smashfs</tt>.
 
+creating a smashed filesystem from source directory with:
+
+    # mkfs.smashfs -s source_directory -o smashfs.fs -b 131072 -c xz -j 8 -d
+
 command line options:
 
 * -s / --source
@@ -107,6 +111,10 @@ command line options:
 
 a smashed filesystem is extracted with the tool <tt>unfs.smashfs</tt>.
 
+extracting a smashed filesystem to output directory with:
+
+    # unfs.smashfs -s smashfs.fs -o output_directory -d
+
 command line options:
 
 * -s / --source
@@ -124,6 +132,19 @@ command line options:
 ## 4. linux kernel ##
 
 linux kernel has to be patched with <tt>smashfs-kernel.patch</tt>.
+
+patching linux kernel is quite easy:
+
+    # cd linux
+    # patch -p0 < smashfs.kernel.patch
+
+enable smashfs, and compression methods from kernel config
+
+    * SmashFS - Smashed file system support
+      * xz compression
+      * lzo compression
+      * lzma compression
+      * gzip comression
 
 ## 5. using ##
 
