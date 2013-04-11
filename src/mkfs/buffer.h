@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Alper Akcan <alper.akcan@gmail.com>.
+ * Copyright (c) 2009-2013, Alper Akcan <alper.akcan@gmail.com>.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
