@@ -11,7 +11,7 @@ smashfs is a read-only linux kernel filesystem with compression support.
 
 ## 1. overview ##
 
-smashfs is a read-only filesystem with compression support.
+smashfs is a read-only compressed filesystem for linux kernel.
 
 supported compressions are:
 
