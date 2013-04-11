@@ -5,7 +5,7 @@ smashfs is a read-only linux kernel filesystem with compression support.
 1. <a href="#1-overview">overview</a>
 2. <a href="#2-creating">creating</a>
 3. <a href="#3-extracting">extracting</a>
-4. <a href="#4-linux-kernel">linux-kernel</a>
+4. <a href="#4-linux-kernel">linux kernel</a>
 4. <a href="#5-using">using</a>
 6. <a href="#6-contact">contact</a>
 
