@@ -66,6 +66,10 @@ command line options:
   enable and set job count for multi-threaded compressing to decrease filesystem creation time,
   default is <tt>8</tt>
 
+* -c / --compressor
+
+  select compression library, default is <tt>none</tt>
+
 * --no_group_mode
 
   disable group mode and use user mode to gain some space
