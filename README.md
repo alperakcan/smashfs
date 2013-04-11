@@ -43,9 +43,79 @@ a smashed filesystem has four main blocks
 
 a smashed filesystem is created with the tool <tt>mkfs.smashfs</tt>.
 
+command line options:
+
+* -s / --source
+
+  source file or directory
+
+* -o / --output
+
+  output file
+
+* -b / --block_size
+
+  data block size, default is <tt>1048576</tt> bytes
+
+* -d / --debug
+
+  enable debugging, can be used repeatedly to increase debug level
+
+* -j / --jobs
+
+  enable and set job count for multi-threaded compressing to decrease filesystem creation time,
+  default is <tt>8</tt>
+
+* --no_group_mode
+
+  disable group mode and use user mode to gain some space
+
+* --no_other_mode
+
+  disable other mode and use user mode to gain some space
+
+* --no_uid
+
+  disable uid and use 0 to gain some space
+
+* --no_gid
+
+  disable gui and use 0 to gain some space
+
+* --no_ctime
+
+  disable ctime and use filesystem creation time to gain some space
+
+* --no_mtime
+
+  disable mtime and use filesystem creation time to gain some space
+
+* --no_padding
+
+  disable padding to 4K to gain some space
+
+* --no_duplicates
+
+  disable duplicate file checking, will increase filesystem size.
+  may be usefull for debugging purposes.
+
 ## 3. extracting ##
 
 a smashed filesystem is extracted with the tool <tt>unfs.smashfs</tt>.
+
+command line options:
+
+* -s / --source
+
+  source file or directory
+
+* -o / --output
+
+  output file
+
+* -d / --debug
+
+  enable debugging, can be used repeatedly to increase debug level
 
 ## 4. linux kernel ##
 
