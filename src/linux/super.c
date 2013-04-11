@@ -86,17 +86,19 @@ static struct kmem_cache *smashfs_inode_cachep			= NULL;
 
 static DEFINE_MUTEX(read_mutex);
 
-#define BLOCK_CACHE_MAX						1
-
 struct block_cache {
 	struct block block;
 	void *buffer;
 };
 
+static int block_caches_max					= 1;
+module_param(block_caches_max, int, S_IRUGO);
+MODULE_PARM_DESC(block_caches_max, "number of allowed block caches (default: 1)");
+
 static DEFINE_MUTEX(block_cache_mutex);
 
-static long long nblock_caches				= 0;
-static struct block_cache block_caches[BLOCK_CACHE_MAX];
+static long long nblock_caches					= 0;
+static struct block_cache *block_caches				= NULL;
 
 static inline struct node_info * smashfs_i (struct inode *inode)
 {
@@ -516,22 +518,24 @@ static inline int node_read (struct super_block *sb, struct node *node, int (*fu
 			b += 1;
 			i = 0;
 
-			mutex_lock(&block_cache_mutex);
-			if (nblock_caches == BLOCK_CACHE_MAX) {
-				kfree(block_caches[BLOCK_CACHE_MAX - 1].buffer);
-			}
-			memmove(&block_caches[1], &block_caches[0], sizeof(struct block_cache) * (BLOCK_CACHE_MAX - 1));
-			memcpy(&block_caches[0].block, &block, sizeof(struct block));
-			block_caches[0].buffer = ubuffer;
-			nblock_caches = min_t(long long, nblock_caches + 1, BLOCK_CACHE_MAX);
-			mutex_unlock(&block_cache_mutex);
+			if (block_caches_max > 0) {
+				mutex_lock(&block_cache_mutex);
+				if (nblock_caches == block_caches_max) {
+					kfree(block_caches[block_caches_max - 1].buffer);
+				}
+				memmove(&block_caches[1], &block_caches[0], sizeof(struct block_cache) * (block_caches_max - 1));
+				memcpy(&block_caches[0].block, &block, sizeof(struct block));
+				block_caches[0].buffer = ubuffer;
+				nblock_caches = min_t(long long, nblock_caches + 1, block_caches_max);
+				mutex_unlock(&block_cache_mutex);
 
-			ubuffer = kmalloc(sbi->super->block_size, GFP_KERNEL);
-			if (ubuffer == NULL) {
-				errorf("malloc failed\n");
-				kfree(cbuffer);
-				leavef();
-				return -1;
+				ubuffer = kmalloc(sbi->super->block_size, GFP_KERNEL);
+				if (ubuffer == NULL) {
+					errorf("malloc failed\n");
+					kfree(cbuffer);
+					leavef();
+					return -1;
+				}
 			}
 		}
 	}
@@ -1265,16 +1269,24 @@ static struct file_system_type smashfs_fs_type = {
 static int __init init_smashfs_fs (void)
 {
 	int rc;
+	block_caches = kmalloc(sizeof(struct block_cache) * block_caches_max, GFP_KERNEL);
+	if (block_caches == NULL) {
+		errorf("kmalloc failed\n");
+		goto bail;
+	}
 	rc = init_inodecache();
 	if (rc != 0) {
 		errorf("inode cache init failed\n");
 		goto bail;
 	}
 	rc = register_filesystem(&smashfs_fs_type);
-	printk(KERN_INFO "smashfs: (c) 2013 Alper Akcan\n");
+	printk(KERN_INFO "smashfs: (c) 2013 Alper Akcan <alper.akcan@gmail.com>\n");
 	return rc;
 bail:
 	destroy_inodecache();
+	if (block_caches != NULL) {
+		kfree(block_caches);
+	}
 	return rc;
 }
 
@@ -1282,6 +1294,9 @@ static void __exit exit_smashfs_fs (void)
 {
 	unregister_filesystem(&smashfs_fs_type);
 	destroy_inodecache();
+	if (block_caches != NULL) {
+		kfree(block_caches);
+	}
 }
 
 module_init(init_smashfs_fs)
