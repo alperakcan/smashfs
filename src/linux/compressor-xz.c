@@ -18,6 +18,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/slab.h>
 #include <linux/xz.h>
 
 #include "compressor-xz.h"
@@ -30,7 +31,7 @@ struct xz {
 void * xz_create (void)
 {
 	struct xz *xz;
-	xz = kmalloc(sizeof(z_stream), GFP_KERNEL);
+	xz = kmalloc(sizeof(struct xz), GFP_KERNEL);
 	if (xz == NULL) {
 		return NULL;
 	}
@@ -53,16 +54,6 @@ void xz_destroy (void *context)
 	kfree(xz);
 }
 
-int xz_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
-{
-	(void) context;
-	(void) src;
-	(void) ssize;
-	(void) dst;
-	(void) dsize;
-	return -1;
-}
-
 int xz_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
 	enum xz_ret ret;
@@ -73,12 +64,12 @@ int xz_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsi
 	s = xz->state;
 	b = &xz->buffer;
 	xz_dec_reset(s);
-	b.in = src;
-	b.in_pos = 0;
-	b.in_size = ssize;
-	b.out = dst;
-	b.out_pos = 0;
-	b.out_size = dsize;
-	ret = xz_dec_run(s, &b);
-	return (ret == XZ_STREAM_END) ? b.out_pos : -1;
+	b->in = src;
+	b->in_pos = 0;
+	b->in_size = ssize;
+	b->out = dst;
+	b->out_pos = 0;
+	b->out_size = dsize;
+	ret = xz_dec_run(s, b);
+	return (ret == XZ_STREAM_END) ? b->out_pos : -1;
 }

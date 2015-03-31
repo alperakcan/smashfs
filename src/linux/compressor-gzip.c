@@ -31,7 +31,7 @@ struct gzip {
 void * gzip_create (void)
 {
 	struct gzip *gzip;
-	gzip = kmalloc(sizeof(z_stream), GFP_KERNEL);
+	gzip = kmalloc(sizeof(struct gzip), GFP_KERNEL);
 	if (gzip == NULL) {
 		return NULL;
 	}
@@ -52,16 +52,6 @@ void gzip_destroy (void *context)
 	gzip = context;
 	vfree(gzip->stream.workspace);
 	kfree(gzip);
-}
-
-int gzip_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
-{
-	(void) context;
-	(void) src;
-	(void) ssize;
-	(void) dst;
-	(void) dsize;
-	return -1;
 }
 
 int gzip_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)

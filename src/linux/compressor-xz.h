@@ -19,5 +19,4 @@
 
 void * xz_create (void);
 void xz_destroy (void *context);
-int xz_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);
 int xz_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);

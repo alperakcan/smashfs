@@ -41,24 +41,23 @@ struct compressor {
 	enum smashfs_compression_type type;
 	void * (*create) (void);
 	void (*destroy) (void *context);
-	int (*compress) (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);
 	int (*uncompress) (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);
 	void *context;
 };
 
 struct compressor *compressors[] = {
-	& (struct compressor) { "none", smashfs_compression_type_none, NULL, NULL, none_compress, none_uncompress },
+	& (struct compressor) { "none", smashfs_compression_type_none, NULL       , NULL        , none_uncompress },
 #if defined(SMASHFS_ENABLE_GZIP) && (SMASHFS_ENABLE_GZIP == 1)
-	& (struct compressor) { "gzip", smashfs_compression_type_gzip, gzip_create, gzip_destroy, gzip_compress, gzip_uncompress },
+	& (struct compressor) { "gzip", smashfs_compression_type_gzip, gzip_create, gzip_destroy, gzip_uncompress },
 #endif
 #if defined(SMASHFS_ENABLE_LZMA) && (SMASHFS_ENABLE_LZMA == 1)
-	& (struct compressor) { "lzma", smashfs_compression_type_lzma, NULL       , NULL        , lzma_compress, lzma_uncompress },
+	& (struct compressor) { "lzma", smashfs_compression_type_lzma, NULL       , NULL        , lzma_uncompress },
 #endif
 #if defined(SMASHFS_ENABLE_LZO) && (SMASHFS_ENABLE_LZO == 1)
-	& (struct compressor) { "lzo" , smashfs_compression_type_lzo , NULL       , NULL        , lzo_compress , lzo_uncompress  },
+	& (struct compressor) { "lzo" , smashfs_compression_type_lzo , NULL       , NULL        , lzo_uncompress  },
 #endif
 #if defined(SMASHFS_ENABLE_XZ) && (SMASHFS_ENABLE_XZ == 1)
-	& (struct compressor) { "xz"  , smashfs_compression_type_xz  , NULL       , NULL        , xz_compress  , xz_uncompress   },
+	& (struct compressor) { "xz"  , smashfs_compression_type_xz  , NULL       , NULL        , xz_uncompress   },
 #endif
 	NULL
 };
@@ -105,11 +104,6 @@ int compressor_destroy (struct compressor *compressor)
 enum smashfs_compression_type compressor_type (struct compressor *compressor)
 {
 	return compressor->type;
-}
-
-int compressor_compress (struct compressor *compressor, void *src, unsigned int ssize, void *dst, unsigned int dsize)
-{
-	return compressor->compress(compressor->context, src, ssize, dst, dsize);
 }
 
 int compressor_uncompress (struct compressor *compressor, void *src, unsigned int ssize, void *dst, unsigned int dsize)

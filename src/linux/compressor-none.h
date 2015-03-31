@@ -17,5 +17,4 @@
  * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-int none_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);
 int none_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);

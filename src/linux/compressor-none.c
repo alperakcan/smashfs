@@ -21,16 +21,6 @@
 
 #include "compressor-none.h"
 
-int none_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
-{
-	(void) context;
-	if (dsize < ssize) {
-		return -1;
-	}
-	memcpy(dst, src, ssize);
-	return ssize;
-}
-
 int none_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
 	(void) context;

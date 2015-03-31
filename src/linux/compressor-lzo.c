@@ -22,16 +22,6 @@
 
 #include "compressor-lzo.h"
 
-int lzo_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
-{
-	(void) context;
-	(void) src;
-	(void) ssize;
-	(void) dst;
-	(void) dsize;
-	return -1;
-}
-
 int lzo_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
 	int rc;

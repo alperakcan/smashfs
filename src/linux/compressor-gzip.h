@@ -19,5 +19,4 @@
 
 void * gzip_create (void);
 void gzip_destroy (void *context);
-int gzip_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);
 int gzip_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);
