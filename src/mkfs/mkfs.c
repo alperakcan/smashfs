@@ -227,7 +227,7 @@ static void * job (void *arg)
 			goto bail;
 		}
 		if (rc > ja->blocks[b].size) {
-			fprintf(stderr, "compressed size is bigger than actual size\n");
+			fprintf(stderr, "compressed size is bigger than actual size (%zd > %lld)\n", rc, ja->blocks[b].size);
 			goto bail;
 		}
 		ja->blocks[b].compressed_size = rc;
