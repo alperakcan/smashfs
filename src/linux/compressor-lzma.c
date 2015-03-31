@@ -19,8 +19,11 @@
 
 #include <linux/module.h>
 
-int lzma_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+#include "compressor-lzma.h"
+
+int lzma_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
+	(void) context;
 	(void) src;
 	(void) ssize;
 	(void) dst;
@@ -28,8 +31,9 @@ int lzma_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 	return -1;
 }
 
-int lzma_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+int lzma_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
+	(void) context;
 	(void) src;
 	(void) ssize;
 	(void) dst;

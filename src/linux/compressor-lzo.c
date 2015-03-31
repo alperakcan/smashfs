@@ -20,8 +20,11 @@
 #include <linux/module.h>
 #include <linux/lzo.h>
 
-int lzo_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+#include "compressor-lzo.h"
+
+int lzo_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
+	(void) context;
 	(void) src;
 	(void) ssize;
 	(void) dst;
@@ -29,10 +32,11 @@ int lzo_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 	return -1;
 }
 
-int lzo_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+int lzo_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
 	int rc;
 	size_t out;
+	(void) context;
 	out = dsize;
 	rc = lzo1x_decompress_safe(src, ssize, dst, &out);
 	if (rc != LZO_E_OK) {

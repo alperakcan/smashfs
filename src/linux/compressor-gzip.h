@@ -17,5 +17,7 @@
  * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-int gzip_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize);
-int gzip_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize);
+void * gzip_create (void);
+void gzip_destroy (void *context);
+int gzip_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);
+int gzip_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);

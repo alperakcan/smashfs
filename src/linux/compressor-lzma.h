@@ -17,5 +17,5 @@
  * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-int lzma_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize);
-int lzma_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize);
+int lzma_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);
+int lzma_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize);

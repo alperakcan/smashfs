@@ -226,6 +226,10 @@ static void * job (void *arg)
 			fprintf(stderr, "compress failed\n");
 			goto bail;
 		}
+		if (rc > ja->blocks[b].size) {
+			fprintf(stderr, "compressed size is bigger than actual size\n");
+			goto bail;
+		}
 		ja->blocks[b].compressed_size = rc;
 		pthread_mutex_lock(&job_mutex);
 		ja->blocks[b].status = 2;
@@ -681,6 +685,10 @@ static int output_write (void)
 	rc = compressor_compress(compressor, buffer_buffer(&inode_buffer), size, bc, size * 2);
 	if (rc < 0) {
 		fprintf(stderr, "compress failed for inodes table\n");
+		goto bail;
+	}
+	if (rc > size) {
+		fprintf(stderr, "compressed size is bigger than actual size\n");
 		goto bail;
 	}
 	rc = buffer_add(&inode_cbuffer, bc, rc);

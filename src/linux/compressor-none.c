@@ -19,8 +19,11 @@
 
 #include <linux/module.h>
 
-int none_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+#include "compressor-none.h"
+
+int none_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
+	(void) context;
 	if (dsize < ssize) {
 		return -1;
 	}
@@ -28,8 +31,9 @@ int none_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 	return ssize;
 }
 
-int none_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+int none_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
+	(void) context;
 	if (dsize < ssize) {
 		return -1;
 	}

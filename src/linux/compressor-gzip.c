@@ -18,11 +18,45 @@
  */
 
 #include <linux/module.h>
+#include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/zlib.h>
 
-int gzip_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+#include "compressor-gzip.h"
+
+struct gzip {
+	z_stream stream;
+};
+
+void * gzip_create (void)
 {
+	struct gzip *gzip;
+	gzip = kmalloc(sizeof(z_stream), GFP_KERNEL);
+	if (gzip == NULL) {
+		return NULL;
+	}
+	gzip->stream.workspace = vmalloc(zlib_inflate_workspacesize());
+	if (gzip->stream.workspace == NULL) {
+		kfree(gzip);
+		return NULL;
+	}
+	return gzip;
+}
+
+void gzip_destroy (void *context)
+{
+	struct gzip *gzip;
+	if (context == NULL) {
+		return;
+	}
+	gzip = context;
+	vfree(gzip->stream.workspace);
+	kfree(gzip);
+}
+
+int gzip_compress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
+{
+	(void) context;
 	(void) src;
 	(void) ssize;
 	(void) dst;
@@ -30,40 +64,31 @@ int gzip_compress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
 	return -1;
 }
 
-int gzip_uncompress (void *src, unsigned int ssize, void *dst, unsigned int dsize)
+int gzip_uncompress (void *context, void *src, unsigned int ssize, void *dst, unsigned int dsize)
 {
 	int rc;
-	z_stream stream;
+	z_stream *stream;
+	struct gzip *gzip;
 
-	stream.workspace = vmalloc(zlib_inflate_workspacesize());
-	if (stream.workspace == NULL) {
-		return -1;
-	}
+	gzip = context;
+	stream = &gzip->stream;
 
-	stream.next_in = NULL;
-	stream.avail_in = 0;
-	zlib_inflateInit2(&stream, -MAX_WBITS);
+	stream->next_in = NULL;
+	stream->avail_in = 0;
+	zlib_inflateInit2(stream, -MAX_WBITS);
 
-	stream.next_in = src;
-	stream.avail_in = ssize;
+	stream->next_in = src;
+	stream->avail_in = ssize;
 
-	stream.next_out = dst;
-	stream.avail_out = dsize;
+	stream->next_out = dst;
+	stream->avail_out = dsize;
 
-	rc = zlib_inflateReset(&stream);
-	if (rc != Z_OK) {
-		zlib_inflateEnd(&stream);
-		zlib_inflateInit2(&stream, -MAX_WBITS);
-	}
-
-	rc = zlib_inflate(&stream, Z_FINISH);
+	rc = zlib_inflate(stream, Z_FINISH);
 	if (rc != Z_STREAM_END) {
-		zlib_inflateEnd(&stream);
-		vfree(stream.workspace);
+		zlib_inflateEnd(stream);
 		return -1;
 	}
 
-	zlib_inflateEnd(&stream);
-	vfree(stream.workspace);
-	return stream.total_out;
+	zlib_inflateEnd(stream);
+	return stream->total_out;
 }
