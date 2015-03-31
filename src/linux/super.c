@@ -35,7 +35,7 @@
 	printk(KERN_ERR "smashfs: " a); \
 }
 
-#if 1
+#if 0
 #define debugf(a...) { \
 	printk(KERN_INFO "smashfs: " a); \
 }
@@ -83,15 +83,42 @@ static const struct inode_operations smashfs_dir_inode_operations;
 static const struct address_space_operations smashfs_aops;
 
 static struct kmem_cache *smashfs_inode_cachep			= NULL;
+static struct kmem_cache *smashfs_block_cachep			= NULL;
 
-struct block_cache {
-	struct block block;
-	void *buffer;
-};
+static inline void inodecache_init_once (void *foo)
+{
+	struct node_info *node;
+	node = foo;
+	inode_init_once(&node->inode);
+}
 
-static int block_caches_max					= 0;
-module_param(block_caches_max, int, S_IRUGO);
-MODULE_PARM_DESC(block_caches_max, "number of allowed block caches (default: 0)");
+static inline int init_inodecache (void)
+{
+	smashfs_inode_cachep = kmem_cache_create("smashfs_inode_cache", sizeof(struct node_info), 0, SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT, inodecache_init_once);
+	return smashfs_inode_cachep ? 0 : -ENOMEM;
+}
+
+
+static inline void destroy_inodecache (void)
+{
+	if (smashfs_inode_cachep != NULL) {
+		kmem_cache_destroy(smashfs_inode_cachep);
+	}
+}
+
+static inline int init_blockcache (size_t size)
+{
+	smashfs_block_cachep = kmem_cache_create("smashfs_block_cache", size, 0, SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT, NULL);
+	return smashfs_block_cachep ? 0 : -ENOMEM;
+}
+
+
+static inline void destroy_blockcache (void)
+{
+	if (smashfs_block_cachep != NULL) {
+		kmem_cache_destroy(smashfs_block_cachep);
+	}
+}
 
 static inline struct node_info * smashfs_i (struct inode *inode)
 {
@@ -445,20 +472,21 @@ static inline int node_read (struct super_block *sb, struct node *node, int (*fu
 	enterf();
 	debugf("offset: %lld, size: %lld\n", offset, size);
 
+	ubuffer = NULL;
+	cbuffer = NULL;
+
 	sbi = sb->s_fs_info;
 
-	ubuffer = kmalloc(sbi->super->block_size, GFP_KERNEL);
+	ubuffer = kmem_cache_alloc(smashfs_block_cachep, GFP_NOIO);
 	if (ubuffer == NULL) {
 		errorf("malloc failed\n");
-		leavef();
-		return -1;
+		goto bail;
 	}
-	cbuffer = kmalloc(sbi->super->block_size, GFP_KERNEL);
+	cbuffer = kmem_cache_alloc(smashfs_block_cachep, GFP_NOIO);
 	if (cbuffer == NULL) {
 		errorf("malloc failed\n");
-		kfree(ubuffer);
-		leavef();
-		return -1;
+		kmem_cache_free(smashfs_block_cachep, ubuffer);
+		goto bail;
 	}
 
 	o = offset + node->index + (node->block * sbi->super->block_size);
@@ -501,18 +529,21 @@ static inline int node_read (struct super_block *sb, struct node *node, int (*fu
 		i = 0;
 	}
 
-	kfree(cbuffer);
-	kfree(ubuffer);
+	kmem_cache_free(smashfs_block_cachep, cbuffer);
+	kmem_cache_free(smashfs_block_cachep, ubuffer);
 	leavef();
 	return 0;
-bail:
-	kfree(cbuffer);
-	kfree(ubuffer);
+bail:	if (cbuffer != NULL) {
+		kmem_cache_free(smashfs_block_cachep, cbuffer);
+	}
+	if (ubuffer != NULL) {
+		kmem_cache_free(smashfs_block_cachep, ubuffer);
+	}
 	leavef();
 	return -1;
 }
 
-static int node_read_directory (void *context, void *buffer, long long size)
+static inline int node_read_directory (void *context, void *buffer, long long size)
 {
 	unsigned char **b;
 
@@ -526,7 +557,7 @@ static int node_read_directory (void *context, void *buffer, long long size)
 	return size;
 }
 
-static int node_read_symbolic_link (void *context, void *buffer, long long size)
+static inline int node_read_symbolic_link (void *context, void *buffer, long long size)
 {
 	unsigned char **b;
 
@@ -540,7 +571,7 @@ static int node_read_symbolic_link (void *context, void *buffer, long long size)
 	return size;
 }
 
-static int node_read_regular_file (void *context, void *buffer, long long size)
+static inline int node_read_regular_file (void *context, void *buffer, long long size)
 {
 	unsigned char **b;
 
@@ -557,7 +588,7 @@ static int node_read_regular_file (void *context, void *buffer, long long size)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 static int smashfs_readdir (struct file *file, void *dirent, filldir_t filldir)
 #else
-static int smashfs_readdir (struct file *file, struct dir_context *dirent)
+static inline int smashfs_readdir (struct file *file, struct dir_context *dirent)
 #endif
 {
 	int rc;
@@ -768,9 +799,9 @@ static int smashfs_readdir (struct file *file, struct dir_context *dirent)
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
-static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry, struct nameidata *nd)
+static inline struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry, struct nameidata *nd)
 #else
-static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry, unsigned int flags)
+static inline struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry, unsigned int flags)
 #endif
 {
 	int rc;
@@ -872,7 +903,7 @@ static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry,
 	return ERR_PTR(-ENOENT);
 }
 
-static int smashfs_readpage (struct file *file, struct page *page)
+static inline int smashfs_readpage (struct file *file, struct page *page)
 {
 	int rc;
 	int bytes_filled;
@@ -940,7 +971,7 @@ bail:
 	return 0;
 }
 
-static struct inode * smashfs_alloc_inode (struct super_block *sb)
+static inline struct inode * smashfs_alloc_inode (struct super_block *sb)
 {
 	struct node_info *node;
 	node = kmem_cache_alloc(smashfs_inode_cachep, GFP_KERNEL);
@@ -956,7 +987,7 @@ static void smashfs_destroy_inode (struct inode *inode)
 
 #else
 
-static void smashfs_i_callback (struct rcu_head *head)
+static inline void smashfs_i_callback (struct rcu_head *head)
 {
 	struct inode *inode;
 	inode = container_of(head, struct inode, i_rcu);
@@ -966,14 +997,14 @@ static void smashfs_i_callback (struct rcu_head *head)
 	kmem_cache_free(smashfs_inode_cachep, smashfs_i(inode));
 }
 
-static void smashfs_destroy_inode(struct inode *inode)
+static inline void smashfs_destroy_inode(struct inode *inode)
 {
 	call_rcu(&inode->i_rcu, smashfs_i_callback);
 }
 
 #endif
 
-static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
+static inline int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
 {
 	u64 id;
 	struct smashfs_super_info *sbi;
@@ -997,7 +1028,7 @@ static int smashfs_statfs (struct dentry *dentry, struct kstatfs *buf)
 	return 0;
 }
 
-static int smashfs_remount (struct super_block *sb, int *flags, char *data)
+static inline int smashfs_remount (struct super_block *sb, int *flags, char *data)
 {
 	enterf();
 
@@ -1008,7 +1039,7 @@ static int smashfs_remount (struct super_block *sb, int *flags, char *data)
 }
 
 
-static void smashfs_put_super (struct super_block *sb)
+static inline void smashfs_put_super (struct super_block *sb)
 {
 	struct smashfs_super_info *sbi;
 
@@ -1026,6 +1057,7 @@ static void smashfs_put_super (struct super_block *sb)
 	compressor_destroy(sbi->compressor);
 	kfree(sbi->super);
 	kfree(sbi);
+	destroy_blockcache();
 
 	leavef();
 }
@@ -1056,28 +1088,7 @@ static const struct super_operations smashfs_super_ops = {
 	.remount_fs    = smashfs_remount
 };
 
-static void init_once (void *foo)
-{
-	struct node_info *node;
-	node = foo;
-	inode_init_once(&node->inode);
-}
-
-static int init_inodecache (void)
-{
-	smashfs_inode_cachep = kmem_cache_create("smashfs_inode_cache", sizeof(struct node_info), 0, SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT, init_once);
-	return smashfs_inode_cachep ? 0 : -ENOMEM;
-}
-
-
-static void destroy_inodecache (void)
-{
-	if (smashfs_inode_cachep != NULL) {
-		kmem_cache_destroy(smashfs_inode_cachep);
-	}
-}
-
-static int smashfs_fill_super (struct super_block *sb, void *data, int silent)
+static inline int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 {
 	int rc;
 	char b[BDEVNAME_SIZE];
@@ -1176,6 +1187,12 @@ static int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	debugf("      compressed_size: %u\n", sbl->bits.block.compressed_size);
 	debugf("      size           : %u\n", sbl->bits.block.size);
 
+	rc = init_blockcache(sbi->super->block_size);
+	if (rc != 0) {
+		errorf("can not create block cache");
+		goto bail;
+	}
+
 	sbi->compressor = compressor_create_type(sbl->compression_type);
 	if (sbi->compressor == NULL) {
 		errorf("compressor create failed\n");
@@ -1212,7 +1229,7 @@ static int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		goto bail;
 	}
 
-	cbuffer = kmalloc(sbl->inodes_csize, GFP_KERNEL);
+	cbuffer = kmem_cache_alloc(smashfs_block_cachep, GFP_NOIO);
 	if (cbuffer == NULL) {
 		errorf("kmalloc failed\n");
 		goto bail;
@@ -1227,7 +1244,7 @@ static int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 		errorf("uncompress failed\n");
 		goto bail;
 	}
-	kfree(cbuffer);
+	kmem_cache_free(smashfs_block_cachep, cbuffer);
 	cbuffer = NULL;
 
 	rc = smashfs_read(sb, sbi->blocks_table, sbl->blocks_offset, sbl->blocks_size);
@@ -1265,7 +1282,7 @@ static int smashfs_fill_super (struct super_block *sb, void *data, int silent)
 	}
 
 	if (cbuffer != NULL) {
-		kfree(cbuffer);
+		kmem_cache_free(smashfs_block_cachep, cbuffer);
 	}
 	leavef();
 	return 0;
@@ -1283,17 +1300,18 @@ bail:
 		kfree(sbi);
 	}
 	if (cbuffer != NULL) {
-		kfree(cbuffer);
+		kmem_cache_free(smashfs_block_cachep, cbuffer);
 	}
 	if (sbl != NULL) {
 		kfree(sbl);
 	}
 	sb->s_fs_info = NULL;
+	destroy_blockcache();
 	leavef();
 	return -EINVAL;
 }
 
-static struct dentry * smashfs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
+static inline struct dentry * smashfs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
 	return mount_bdev(fs_type, flags, dev_name, data, smashfs_fill_super);
 }
