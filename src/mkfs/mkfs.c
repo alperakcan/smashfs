@@ -1192,7 +1192,7 @@ static void help_print (const char *pname)
 	fprintf(stdout, "  -b, --block_size : block size (default: %d)\n", block_size);
 	fprintf(stdout, "  -d, --debug      : enable debug output (default: %d)\n", debug);
 	fprintf(stdout, "  -j, --jobs       : enable compressing with jobs (default: %d)\n", njobs);
-	fprintf(stdout, "  -c, --compressor : select compressor (default: none)\n");
+	fprintf(stdout, "  -c, --compressor : select compressor (gzip, lzma, lzo, xz) (default: none)\n");
 	fprintf(stdout, "  --no_group_mode  : disable group mode\n");
 	fprintf(stdout, "  --no_other_mode  : disable other mode\n");
 	fprintf(stdout, "  --no_uid         : disable uid\n");

@@ -40,7 +40,7 @@
 	printk(KERN_INFO "smashfs: " a); \
 }
 #else
-#define debugf(a...)
+#define debugf(a...) do { } while (0);
 #endif
 
 #define enterf() { \
@@ -288,8 +288,13 @@ static inline struct inode * smashfs_get_inode (struct super_block *sb, long lon
 	sbi = sb->s_fs_info;
 
 	inode->i_mode   = mode;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 	inode->i_uid    = node.uid;
 	inode->i_gid    = node.gid;
+#else
+	i_uid_write(inode, node.uid);
+	i_gid_write(inode, node.gid);
+#endif
 	inode->i_size   = node.size;
 	inode->i_blocks = ((node.size + sbi->devblksize - 1) >> sbi->devblksize_log2) + 1;
 	inode->i_ctime.tv_sec = node.ctime;
@@ -593,7 +598,11 @@ static int node_read_regular_file (void *context, void *buffer, long long size)
 	return size;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
+#else
+static int smashfs_readdir (struct file *file, struct dir_context *dir)
+#endif
 {
 	int rc;
 
@@ -620,14 +629,23 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	debugf("filp->f_pos: %lld\n", filp->f_pos);
 
 	nbuffer = NULL;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 	inode = filp->f_path.dentry->d_inode;
+#else
+	inode = file_inode(file);
+#endif
 	sb = inode->i_sb;
 	sbi = sb->s_fs_info;
 
 	node = &(smashfs_i(inode)->node);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 	if (filp->f_pos >= 3 + node->size) {
 		debugf("finished reading (%lld, %lld)\n", filp->f_pos, node->size);
+#else
+	if (dir->pos >= 3 + node->size) {
+		debugf("finished reading (%lld, %lld)\n", dir->pos, node->size);
+#endif
 		leavef();
 		return 0;
 	}
@@ -654,10 +672,18 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	directory_nentries = bitbuffer_getbits(&bb, sbi->super->bits.inode.directory.nentries);
 	bitbuffer_uninit(&bb);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 	while (filp->f_pos < 3) {
+#else
+	while (dir->pos < 3) {
+#endif
 		int i_ino;
 		char *name;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 		if (filp->f_pos == 0) {
+#else
+		if (dir->pos == 0) {
+#endif
 			name = ".";
 			s = 1;
 			i_ino = inode->i_ino;
@@ -667,13 +693,21 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 			i_ino = directory_parent + 1;
 		}
 		debugf("calling filldir(%p, %s, %lld, %lld, %d, %d)\n", dirent, name, s, filp->f_pos, i_ino, DT_DIR);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 		if (filldir(dirent, name, s, filp->f_pos, i_ino, DT_DIR) < 0) {
+#else
+		if (dir_emit(dir, name, s, i_ino, DT_DIR) != 0) {
+#endif
 			debugf("filldir failed\n");
 			kfree(nbuffer);
 			leavef();
 			return 0;
 		}
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 		filp->f_pos += s;
+#else
+		dir->pos += s;
+#endif
 	}
 
 	debugf("number: %lld, parent: %lld, nentries: %lld\n", node->number, directory_parent, directory_nentries);
@@ -682,9 +716,15 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	s += sbi->super->bits.inode.directory.nentries;
 	s  = (s + 7) / 8;
 	buffer += s;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 	if (filp->f_pos < 3 + s) {
 		filp->f_pos += s;
 	}
+#else
+	if (dir->pos < 3 + s) {
+		dir->pos += s;
+	}
+#endif
 
 	for (e = 0; e < directory_nentries; e++) {
 		s  = 0;
@@ -702,7 +742,11 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 		buffer += s;
 
 		debugf("  - %lld, f_pos: %lld, %zd\n", directory_entry_number, filp->f_pos, ((buffer - s) - nbuffer) + 3);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 		if (filp->f_pos == ((buffer - s) - nbuffer) + 3) {
+#else
+		if (dir->pos == ((buffer - s) - nbuffer) + 3) {
+#endif
 			debugf("    calling filldir(%p, %lld, %lld, %lld, %s)\n",
 				dirent,
 				directory_entry_length,
@@ -715,6 +759,7 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 				(directory_entry_type == smashfs_inode_type_block_device) ? "DT_BLK" :
 				(directory_entry_type == smashfs_inode_type_fifo) ? "DT_FIFO" :
 				(directory_entry_type == smashfs_inode_type_socket) ? "DT_SOCK" : "DT_UNKNOWN");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 			if (filldir(dirent,
 				    buffer,
 				    directory_entry_length,
@@ -727,13 +772,31 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 				    (directory_entry_type == smashfs_inode_type_block_device) ? DT_BLK :
 				    (directory_entry_type == smashfs_inode_type_fifo) ? DT_FIFO :
 				    (directory_entry_type == smashfs_inode_type_socket) ? DT_SOCK : DT_UNKNOWN) < 0) {
+#else
+			if (dir_emit(dir,
+				    buffer,
+				    directory_entry_length,
+				    directory_entry_number + 1,
+				    (directory_entry_type == smashfs_inode_type_regular_file) ? DT_REG :
+				    (directory_entry_type == smashfs_inode_type_directory) ? DT_DIR :
+				    (directory_entry_type == smashfs_inode_type_symbolic_link) ? DT_LNK :
+				    (directory_entry_type == smashfs_inode_type_character_device) ? DT_CHR :
+				    (directory_entry_type == smashfs_inode_type_block_device) ? DT_BLK :
+				    (directory_entry_type == smashfs_inode_type_fifo) ? DT_FIFO :
+				    (directory_entry_type == smashfs_inode_type_socket) ? DT_SOCK : DT_UNKNOWN) != 0) {
+#endif
 				debugf("filldir failed\n");
 				kfree(nbuffer);
 				leavef();
 				return 0;
 			}
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 			filp->f_pos += s;
 			filp->f_pos += directory_entry_length;
+#else
+			dir->pos += s;
+			dir->pos += directory_entry_length;
+#endif
 		}
 
 		buffer += directory_entry_length;
@@ -744,7 +807,11 @@ static int smashfs_readdir (struct file *filp, void *dirent, filldir_t filldir)
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry, struct nameidata *nd)
+#else
+static struct dentry * smashfs_lookup (struct inode *dir, struct dentry *dentry, unsigned int flags)
+#endif
 {
 	int rc;
 
@@ -921,7 +988,7 @@ static struct inode * smashfs_alloc_inode (struct super_block *sb)
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,38)
 
-static void smashfs_destroy_inode(struct inode *inode)
+static void smashfs_destroy_inode (struct inode *inode)
 {
 	kmem_cache_free(smashfs_inode_cachep, smashfs_i(inode));
 }
@@ -932,7 +999,9 @@ static void smashfs_i_callback (struct rcu_head *head)
 {
 	struct inode *inode;
 	inode = container_of(head, struct inode, i_rcu);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 	INIT_LIST_HEAD(&inode->i_dentry);
+#endif
 	kmem_cache_free(smashfs_inode_cachep, smashfs_i(inode));
 }
 
@@ -1003,7 +1072,11 @@ static void smashfs_put_super (struct super_block *sb)
 static const struct file_operations smashfs_directory_operations = {
 	.llseek  = default_llseek,
 	.read    = generic_read_dir,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 	.readdir = smashfs_readdir,
+#else
+	.iterate = smashfs_readdir,
+#endif
 };
 
 static const struct inode_operations smashfs_dir_inode_operations = {
