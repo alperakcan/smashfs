@@ -40,7 +40,7 @@ EXTRA_CFLAGS  = ${cflags-y}
 KDIR := ${KERNEL_PATH}
 
 all:
-	ARCH=${CHIP_ARCH} CROSS_COMPILE=${CROSS_COMPILE_FREFIX} ${MAKE} -C ${KDIR} SUBDIRS=${CURDIR} modules
+	ARCH=${CHIP_ARCH} CROSS_COMPILE=${CROSS_COMPILE_PREFIX} ${MAKE} -C ${KDIR} SUBDIRS=${CURDIR} modules
 
 clean:
 	@rm -rf *.o .*.o.d *.ko *.mod *.mod.c *~ .*.cmd *.symvers modules.order Module.markers
